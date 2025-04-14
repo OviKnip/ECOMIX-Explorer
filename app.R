@@ -9,6 +9,7 @@ library(ggsci)
 library(DT)
 library(ggplot2)
 library(here)
+
 # Decimal numbers
 options(scipen = 999)
 
@@ -275,6 +276,19 @@ ui <- page_navbar(
               # Define the output table
               DT::dataTableOutput("data_table")
             ),
+  ),
+  
+  ## PANEL 4: Food Web Dynamic Model (Embedded Julia Dash)
+  nav_panel(
+    title = "Food Web Dynamics",
+    fluid = TRUE,
+    tags$iframe(
+      src = "http://127.0.0.1:8050",  
+      height = "700px",
+      width = "100%",
+      frameborder = "0",
+      style = "margin: 0;" 
+    )
   ),
   
   nav_spacer(),
