@@ -8,40 +8,40 @@ library(dplyr)
 library(ggsci)
 library(DT)
 library(ggplot2)
-
+library(here)
 # Decimal numbers
 options(scipen = 999)
 
 # Define path of the project
-path <- "D:/Work/Data/GITHUB/ECOMIX_Explorer/ECOMIX-Explorer/"
+#path <- "D:/Work/Data/GITHUB/ECOMIX_Explorer/ECOMIX-Explorer/"
 
 
 ## Load required datasets
 
 # Study area
-catchment_shp <- read_sf(dsn = paste(path, "/data/", sep = ""), layer = "Wharfe_catchments_wgs")
+catchment_shp <- read_sf(dsn = here("data"), layer = "Wharfe_catchments_wgs")
 
 # HYPE Subbasins (modelling units)
-subbasin_shp <- read_sf(dsn = paste(path, "/data/", sep = ""), layer = "Wharfe_subbasins_wgs")
+subbasin_shp <- read_sf(dsn = here("data"), layer = "Wharfe_subbasins_wgs")
 
 # Table with climate information
-df_stats_climate <- read.csv(paste(path, "/data/subbasin_climate.csv", sep = ""))
+df_stats_climate <- read.csv(here("data/subbasin_climate.csv"))
 df_stats_climate$subbasin <- as.numeric(gsub("X", "", df_stats_climate$subbasin))
 
 # Table with subbasin statistics
-df_stats_lc <- read.csv(paste(path, "/data/subbasin_lc.csv", sep = ""))
+df_stats_lc <- read.csv(here("data/subbasin_lc.csv"))
 df_stats_lc$subbasin <- as.numeric(gsub("X", "", df_stats_lc$subbasin))
 
 # Table with monthly model predictions
-df_data <- read.csv(paste(path, "/data/Dummy_Data_Climate.csv", sep = ""))
+df_data <- read.csv(here("data/Dummy_Data_Climate.csv"))
 df_data_long <- reshape2::melt(df_data, id.vars = c("scenario", "subbasin", "month"))
 
 # Table with daily runoff
-df_runoff <- read.csv(paste(path, "/data/Dummy_Data_Runoff.csv", sep = ""))
+df_runoff <- read.csv(here("data/Dummy_Data_Runoff.csv"))
 df_runoff$date <- as.Date(df_runoff$date)
 
 # Table with daily Water temperature 
-df_temp <- read.csv(paste(path, "/data/Dummy_Data_TT2.csv", sep = ""))
+df_temp <- read.csv(here("data/Dummy_Data_TT2.csv"))
 df_temp$date <- as.Date(df_temp$date)
 
 
@@ -479,6 +479,7 @@ server <- function(input, output, session) {
   })
   
 }
+
 
 ### 3. Execution
 shinyApp(ui = ui, server = server)
