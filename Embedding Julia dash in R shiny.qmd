@@ -1,0 +1,21 @@
+---
+title: "Embedding Julia Dash in R Shiny"
+format: html
+editor: visual
+---
+
+## How to Embed
+
+The Julia Dash app, located in the `END_Dash` folder, provides an interactive platform for food web modeling. It is integrated into the R Shiny app by embedding the Dash interface within a Shiny tab using an `iframe`.
+
+A dedicated tab in the Shiny app, titled **"Food Web Dynamics"**, displays the Julia Dash interface alongside other panels in the app.
+
+<br>
+
+## How to Run the Integrated App
+
+First, navigate to [this page](https://beckslab.github.io/JuliaTutorials_BecksLab/01_download_setup.html) to follow instructions to download and install Julia and VSCode.
+
+Second, launch the Julia Dash app in VSCode before starting the R Shiny app. Open VSCode and run the Julia script `END_Dash.jl` to start the Dash server. The server can be accessed at: http://127.0.0.1:8050.
+
+Third, run the Shiny app `app.R`. The embedded iframe in the Shiny app will automatically connect to the running Julia Dash server and display it in the "Food Web Dynamics" tab.
