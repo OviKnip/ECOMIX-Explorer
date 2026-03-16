@@ -1,6 +1,6 @@
 # Define path of the project
-path <- "D:/GITHUB/ECOMIX_Explorer/ECOMIX-Explorer/"
-setwd(path) 
+# path <- "D:/GITHUB/ECOMIX_Explorer/ECOMIX-Explorer/"
+path <- here::here()
 
 # Load Packages
 library(leaflet)
@@ -60,11 +60,63 @@ df_historical_observations$date <- as.Date(df_historical_observations$date)
 #df_projections_percentile <-  open_dataset(here("data/DB_Proj_Percentiles")) %>% collect()
 #df_projections_percentile$period <- paste0(df_projections_percentile$start_year, "-", df_projections_percentile$end_year)
 
+# Keep Arrow dataset handles open once to avoid repeated metadata scans in renderers.
+ds_proj_forcing <- open_dataset(here("data/DB_Proj_Forcing"))
+ds_proj_year <- open_dataset(here("data/DB_Proj_Year"))
+ds_proj_month <- open_dataset(here("data/DB_Proj_Month"))
+ds_proj_percentiles <- open_dataset(here("data/DB_Proj_Percentiles"))
+
 # read map input
 df_map_input <- read_parquet(here("data/Subbasin_Extremes.gz.parquet"))
 df_map_input <- df_map_input %>% filter(prediction_percentile == 99.9,
                                         ssp == "SSP585",
                                         period == "2070-2080")
+
+# Cache expensive tabular download extracts per variable to avoid repeatedly
+# scanning large Arrow datasets when users toggle between options.
+tabular_download_cache <- new.env(parent = emptyenv())
+
+build_tabular_download <- function(dl_variable) {
+  if (dl_variable %in% c("precip", "temp")) {
+    dl_lookup <- c("precip" = "Precipitation", "temp" = "Temperature")
+    dl_variable_label <- unname(dl_lookup[dl_variable])
+
+    df_download <- ds_proj_forcing %>%
+      filter(variable == dl_variable_label) %>%
+      select(subbasin, ssp, period, month, variable, p50, unit) %>%
+      collect() %>%
+      rename("scenario" = ssp, "value" = p50)
+  } else {
+    hype_lookup <- c(
+      "runoff" = "discharge",
+      "soil_moisture" = "Soil moisture",
+      "water_temperature" = "water temperature",
+      "susp_sediments" = "Susp. Sediments",
+      "inorganic_nitrogen" = "Inorganic Nitrogen"
+    )
+    hype_variable_label <- unname(hype_lookup[dl_variable])
+
+    df_download <- ds_proj_month %>%
+      filter(
+        hype_variable == hype_variable_label,
+        prediction_percentile == "p50"
+      ) %>%
+      select(subbasin, ssp, period, month, hype_variable, prediction_percentile, p50_ensemble, unit) %>%
+      collect() %>%
+      rename("scenario" = ssp, "value" = p50_ensemble)
+  }
+
+  df_download %>%
+    mutate("value" = round(value, 3)) %>%
+    dplyr::select(subbasin, scenario, period, month, value, unit)
+}
+
+get_tabular_download <- function(dl_variable) {
+  if (!exists(dl_variable, envir = tabular_download_cache, inherits = FALSE)) {
+    tabular_download_cache[[dl_variable]] <- build_tabular_download(dl_variable)
+  }
+  tabular_download_cache[[dl_variable]]
+}
 
 # Climate projections 
 #df_ukcp_climate <- open_dataset(here("data/DB_Proj_Forcing")) %>% collect()
@@ -166,8 +218,33 @@ widget_download_variable <- selectInput(
   choices =
     c("Precipitation" = "precip",
       "Temperature" = "temp",
-      "Discharge" = "runoff"),
+      "Discharge" = "runoff",
+      "Soil Moisture" = "soil_moisture",
+      "Water Temperature" = "water_temperature",
+      "Susp. Sediments" = "susp_sediments",
+      "Inorganic Nitrogen" = "inorganic_nitrogen"),
   selected = "Precipitation")
+
+widget_download_data_type <- selectInput(
+  inputId = "dl_data_type",
+  label = "Data type",
+  choices = c("Tabular" = "tabular", "Spatial" = "spatial"),
+  selected = "tabular"
+)
+
+widget_download_spatial_layer <- selectInput(
+  inputId = "dl_spatial_layer",
+  label = "Spatial layer",
+  choices = c("Subbasins" = "subbasins", "Catchment" = "catchment"),
+  selected = "subbasins"
+)
+
+widget_download_format <- selectInput(
+  inputId = "dl_format",
+  label = "Download format",
+  choices = c("CSV" = "csv", "XLSX" = "xlsx", "Parquet" = "parquet"),
+  selected = "csv"
+)
 
 
 
@@ -175,6 +252,7 @@ widget_download_variable <- selectInput(
 
 ui <- page_navbar(
   # General aesthetics
+  id = "main_nav",
   title = "ECOMIX Explorer",
   bg = "#2D89C8",
   inverse = TRUE, # This inverts the colors - looks nicer
@@ -255,23 +333,23 @@ ui <- page_navbar(
                 value_box(
                   title = "Selected Subbasin",
                   value = textOutput("text_subbasin"),
-                  showcase = bsicons::bs_icon("pin-map-fill")
+                  # showcase = bsicons::bs_icon("pin-map-fill")
                 ),
                 value_box(
                   title = "Upstream Area",
                   value = textOutput("text_upstream_area"),
-                  showcase = bsicons::bs_icon("hexagon")
+                  # showcase = bsicons::bs_icon("hexagon")
                 ),
                 value_box(
                   title = "Average precipitation",
                   value = textOutput("text_precip"),
-                  showcase = bsicons::bs_icon("cloud-hail-fill")
+                  # showcase = bsicons::bs_icon("cloud-hail-fill")
                 ),
                 value_box(
                   title = "Annual Temperature",
                   value = textOutput("text_maat"),
                   #showcase = bsicons::bs_icon("brightness-high-fill")
-                  showcase = bsicons::bs_icon("thermometer-half")
+                  # showcase = bsicons::bs_icon("thermometer-half")
                 )
               ),
               
@@ -405,7 +483,11 @@ ui <- page_navbar(
                 helpText("Some instructions here"),
                 
                 # Interactive widget that lets select (and deselect multiple scenarios)
-                widget_download_variable
+                widget_download_variable,
+                widget_download_data_type,
+                widget_download_spatial_layer,
+                widget_download_format,
+                downloadButton("download_data", "Download Data")
               ),
               
               # Define the output table
@@ -450,15 +532,32 @@ server <- function(input, output, session) {
   
   # use reactive values to store the id from observing the shape click
   rv <- reactiveVal()
+
+  selected_climate <- reactive({
+    req(rv())
+    df_stats_climate %>% filter(subbasin == rv())
+  })
+
+  selected_lc <- reactive({
+    req(rv())
+    df_stats_lc %>% filter(subbasin == rv())
+  })
+
+  selected_historical <- reactive({
+    req(rv())
+    df_historical_observations %>% filter(subbasin == rv())
+  })
   
   # Track clicks
   observeEvent(input$basemap_shape_click, {
     rv(input$basemap_shape_click$id)
   })  
-  
-  # Create Popup options
-  popup_text <- paste0("<strong>Subbasin id: </strong>", 
-                       subbasin_shp$Id)
+
+  # Open Data Explorer from map popup link and keep selected subbasin in sync.
+  observeEvent(input$open_data_explorer, {
+    rv(as.numeric(input$open_data_explorer))
+    bslib::nav_select("main_nav", selected = "Data Explorer", session = session)
+  })
   
   ## Reactive selection of observed variables
   observation_choices <- reactive({
@@ -496,7 +595,12 @@ server <- function(input, output, session) {
                   color = "black",
                   opacity =  0.5,
                   weight = 2,
-                  popup = popup_text,
+                  popup = ~paste0(
+                    "<strong>Subbasin id: </strong>", Id,
+                    "<br><a href='#' onclick=\"Shiny.setInputValue('open_data_explorer', '",
+                    Id,
+                    "', {priority: 'event'}); return false;\">Open in Data Explorer</a>"
+                  ),
                   layerId = ~Id)
   })
   
@@ -509,8 +613,8 @@ server <- function(input, output, session) {
     
     # If subbasin is selected 
     # Subset data
-    df_climate_tmp <- df_stats_climate %>% filter(subbasin == rv())
-    df_stats_lc_tmp <- df_stats_lc %>% filter(subbasin == rv())
+    df_climate_tmp <- selected_climate()
+    df_stats_lc_tmp <- selected_lc()
     
     HTML(paste("Selected polygon: ", rv(), "<br>",
                "Upstream area: ", round(df_stats_lc_tmp$value[df_stats_lc_tmp$variable == "Upstream area"] / 1000000, 2), " km2 <br>",
@@ -525,22 +629,22 @@ server <- function(input, output, session) {
   ## Heading Widgets - General Information
   output$text_subbasin <- renderText({
     if (is.null(rv())) return ("Please select a subbasin in the map tab")
-    df_climate_tmp <- df_stats_climate %>% filter(subbasin == rv())
+    df_climate_tmp <- selected_climate()
     as.character(df_climate_tmp$subbasin[1])
   })
   output$text_upstream_area <- renderText({
     if (is.null(rv())) return (" ")
-    df_stats_lc_tmp <- df_stats_lc %>% filter(subbasin == rv())
+    df_stats_lc_tmp <- selected_lc()
     paste(round(df_stats_lc_tmp$value[df_stats_lc_tmp$variable == "Upstream area"] / 1000000, 2), "km²")
   })
   output$text_precip <- renderText({
     if (is.null(rv())) return (" ")
-    df_climate_tmp <- df_stats_climate %>% filter(subbasin == rv())
+    df_climate_tmp <- selected_climate()
     paste(as.character(round(df_climate_tmp$precip[1]), 0), "mm")
   })
   output$text_maat <- renderText({
     if (is.null(rv())) return (" ")
-    df_climate_tmp <- df_stats_climate %>% filter(subbasin == rv())
+    df_climate_tmp <- selected_climate()
     paste(as.character(round(df_climate_tmp$maat[1]), 1), "°C")
   })
   
@@ -561,7 +665,7 @@ server <- function(input, output, session) {
     }
     
     # open data
-    df_plot <- open_dataset(here("data/DB_Proj_Forcing")) %>% 
+    df_plot <- ds_proj_forcing %>% 
       filter(
         variable == sub_climate_variable,
         subbasin %in% sub_subbasin, 
@@ -608,7 +712,7 @@ server <- function(input, output, session) {
     if (is.null(rv())) return ("Please select a subbasin by clicking on the map")
     
     # Filter subbasin 
-    df_data <- df_historical_observations %>% filter(subbasin == rv())
+    df_data <- selected_historical()
     
     # Subset the variable based on widget
     df_plot <- df_data[df_data$variable == input$observation_variable, ]
@@ -679,7 +783,7 @@ server <- function(input, output, session) {
     sub_plot_type <- unique(input$plot_type)
     
     # open database
-    df_projections_year <- open_dataset(here("data/DB_Proj_Year")) %>%
+        df_projections_year <- ds_proj_year %>%
       filter(subbasin %in% sub_subbasin,
              hype_variable  %in% sub_variable,
              ssp %in% c("Baseline",sub_scenarios),
@@ -773,7 +877,7 @@ server <- function(input, output, session) {
     }
     sub_plot_type <- unique(input$plot_type)
     
-    df_projections_month <- open_dataset(here("data/DB_Proj_Month")) %>%
+        df_projections_month <- ds_proj_month %>%
       filter(subbasin %in% sub_subbasin, 
              hype_variable  %in% sub_variable, 
              ssp %in% c("Baseline", sub_scenarios),
@@ -869,7 +973,7 @@ server <- function(input, output, session) {
       sub_periods <- c("2000-2022", sub_periods)
     }
     
-    df_plot <- open_dataset(here("data/DB_Proj_Percentiles")) %>% 
+        df_plot <- ds_proj_percentiles %>% 
       filter(subbasin %in% sub_subbasin, 
              hype_variable  %in% sub_variable, 
              ssp %in% sub_scenarios,
@@ -947,19 +1051,170 @@ server <- function(input, output, session) {
   })
   
   ## Table in navbar 3.
-  output$data_table <-  DT::renderDataTable({
-    # Dont do anything if no subbasin was selected
-    if (is.null(rv())) return (data.frame("V1" = "Please select a subbasin by clicking on the map", "V2" = NA))
-    
-    # Subset to subbasin and variable
-    df_data_long <- df_data_long %>% filter(subbasin == rv(), variable == input$dl_variable) %>%
-      mutate("value" = round(value, 1)) %>% dplyr::select(subbasin, scenario, month, value)
+  observeEvent(input$dl_data_type, {
+    if (input$dl_data_type == "tabular") {
+      updateSelectInput(
+        session,
+        inputId = "dl_format",
+        choices = c("CSV" = "csv", "XLSX" = "xlsx", "Parquet" = "parquet"),
+        selected = "csv"
+      )
+    } else {
+      updateSelectInput(
+        session,
+        inputId = "dl_format",
+        choices = c("Shapefile (.zip)" = "shp", "GeoParquet" = "geoparquet", "GPKG" = "gpkg"),
+        selected = "gpkg"
+      )
+    }
+  }, ignoreInit = TRUE)
+
+  downloader_tabular_all_data <- reactive({
+    req(input$dl_variable)
+    get_tabular_download(input$dl_variable)
   })
+
+  downloader_tabular_data <- reactive({
+    req(rv())
+    downloader_tabular_all_data() %>% filter(subbasin == rv())
+  })
+
+  downloader_spatial_data <- reactive({
+    tab_data <- downloader_tabular_all_data()
+
+    if (input$dl_spatial_layer == "catchment") {
+      if (nrow(tab_data) == 0) {
+        return(catchment_shp %>%
+                 mutate(spatial_layer = input$dl_spatial_layer,
+                        variable = input$dl_variable,
+                        n_records = 0,
+                        value_mean = NA_real_,
+                        value_min = NA_real_,
+                        value_max = NA_real_,
+                        unit = NA_character_))
+      }
+
+      tab_summary <- tab_data %>%
+        summarise(
+          n_records = n(),
+          value_mean = mean(value, na.rm = TRUE),
+          value_min = min(value, na.rm = TRUE),
+          value_max = max(value, na.rm = TRUE),
+          unit = dplyr::first(unit)
+        )
+
+      return(catchment_shp %>%
+               mutate(spatial_layer = input$dl_spatial_layer,
+                      variable = input$dl_variable,
+                      n_records = tab_summary$n_records,
+                      value_mean = round(tab_summary$value_mean, 3),
+                      value_min = round(tab_summary$value_min, 3),
+                      value_max = round(tab_summary$value_max, 3),
+                      unit = tab_summary$unit))
+    }
+
+    # Subbasin spatial exports include all subbasins and per-subbasin summaries.
+    tab_summary_by_sub <- tab_data %>%
+      group_by(subbasin) %>%
+      summarise(
+        n_records = n(),
+        value_mean = round(mean(value, na.rm = TRUE), 3),
+        value_min = round(min(value, na.rm = TRUE), 3),
+        value_max = round(max(value, na.rm = TRUE), 3),
+        unit = dplyr::first(unit),
+        .groups = "drop"
+      )
+
+    subbasin_shp %>%
+      left_join(tab_summary_by_sub, by = c("Id" = "subbasin")) %>%
+      mutate(spatial_layer = input$dl_spatial_layer,
+             variable = input$dl_variable)
+  })
+
+  output$data_table <-  DT::renderDataTable({
+    if (input$dl_data_type == "tabular") {
+      if (is.null(rv())) {
+        return(data.frame("V1" = "Please select a subbasin by clicking on the map", "V2" = NA))
+      }
+      df_download <- downloader_tabular_data()
+      if (nrow(df_download) == 0) {
+        return(data.frame("V1" = "No downloader data available for this subbasin/variable", "V2" = NA))
+      }
+      return(df_download)
+    }
+
+    df_spatial <- downloader_spatial_data()
+    if (nrow(df_spatial) == 0) {
+      return(data.frame("V1" = "No spatial data available for this subbasin", "V2" = NA))
+    }
+
+    sf::st_drop_geometry(df_spatial)
+  })
+
+  output$download_data <- downloadHandler(
+    filename = function() {
+      ext <- switch(input$dl_format,
+                    "shp" = "zip",
+                    "geoparquet" = "parquet",
+                    input$dl_format)
+      prefix <- if (input$dl_data_type == "spatial") "ecomix_spatial" else "ecomix_tabular"
+      layer_suffix <- if (input$dl_data_type == "spatial") paste0("_", input$dl_spatial_layer) else ""
+      id_suffix <- if (input$dl_data_type == "spatial") {
+        if (input$dl_spatial_layer == "subbasins") "all_subbasins" else "catchment"
+      } else {
+        paste0("subbasin_", rv())
+      }
+      paste0(prefix, layer_suffix, "_", id_suffix, "_", input$dl_variable, ".", ext)
+    },
+    content = function(file) {
+      if (input$dl_data_type == "tabular") {
+        df_download <- downloader_tabular_data()
+        if (nrow(df_download) == 0) {
+          stop("No tabular data available for the selected subbasin/variable.")
+        }
+
+        if (input$dl_format == "csv") {
+          write.csv(df_download, file, row.names = FALSE)
+        } else if (input$dl_format == "xlsx") {
+          if (!requireNamespace("writexl", quietly = TRUE)) {
+            stop("Package 'writexl' is required for XLSX downloads. Install with install.packages('writexl').")
+          }
+          writexl::write_xlsx(df_download, path = file)
+        } else {
+          arrow::write_parquet(df_download, sink = file)
+        }
+      } else {
+        df_spatial <- downloader_spatial_data()
+        if (nrow(df_spatial) == 0) {
+          stop("No spatial data available for the selected subbasin.")
+        }
+
+        if (input$dl_format == "shp") {
+          tmp_dir <- tempfile("ecomix_shp_")
+          dir.create(tmp_dir)
+          shp_path <- file.path(tmp_dir, "ecomix_spatial.shp")
+          sf::st_write(df_spatial, dsn = shp_path, driver = "ESRI Shapefile", quiet = TRUE, delete_layer = TRUE)
+          shp_files <- list.files(tmp_dir, full.names = TRUE)
+          zip_tmp <- tempfile(fileext = ".zip")
+          utils::zip(zipfile = zip_tmp, files = shp_files)
+          file.copy(zip_tmp, file, overwrite = TRUE)
+        } else if (input$dl_format == "gpkg") {
+          sf::st_write(df_spatial, dsn = file, driver = "GPKG", quiet = TRUE, delete_dsn = TRUE)
+        } else {
+          sf::st_write(df_spatial, dsn = file, driver = "Parquet", quiet = TRUE, delete_dsn = TRUE)
+        }
+      }
+    }
+  )
   
 }
 
 
-### 3. Execution
-shinyApp(ui = ui, server = server)
-#shinyApp(ui, function(input, output) {}) # For testing - creates no plots
+# ### 3. Execution
+# shinyApp(ui = ui, server = server)
+# shinyApp(ui, function(input, output) {}) # For testing - creates no plots
 
+# shiny::runApp()
+
+### 3. Execution
+shiny::runApp(shinyApp(ui = ui, server = server), launch.browser = TRUE)
