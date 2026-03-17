@@ -264,11 +264,11 @@ ui <- page_navbar(
   # General aesthetics
   id = "main_nav",
   title = "ECOMIX Explorer",
-  bg = "#2D89C8",
+  bg = "#A26BCDFF", # Background color of the navbar
   inverse = TRUE, # This inverts the colors - looks nicer
   tags$style(HTML("\n    .de-summary-boxes .value-box,\n    .de-summary-boxes .bslib-value-box {\n      height: 78px !important;\n      min-height: 78px !important;\n      max-height: 78px !important;\n      overflow: hidden;\n    }\n    .de-summary-boxes .value-box .card-body,\n    .de-summary-boxes .bslib-value-box .card-body {\n      padding-top: 0.45rem;\n      padding-bottom: 0.45rem;\n    }\n  ")),
   
-  ## Definition of the Tabs
+  ## Definition of the Tabs 
   
   # Panel 1: Map for subbasin selection
   nav_panel(title = "Map", 
