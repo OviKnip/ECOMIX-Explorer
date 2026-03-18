@@ -17,6 +17,16 @@ library(arrow)
 # Decimal numbers
 options(scipen = 999)
 
+safe_open_dataset <- function(dataset_path) {
+  open_dataset(
+    dataset_path,
+    factory_options = list(
+      exclude_invalid_files = TRUE,
+      selector_ignore_prefixes = c(".", "_")
+    )
+  )
+}
+
 
 ## Load required datasets
 
@@ -48,7 +58,7 @@ df_temp$date <- as.Date(df_temp$date)
 
 # Historical simulations at observation sites
 db_name <- here("data/DB_Historical_Sim_Obs")
-df_historical_observations <- open_dataset(db_name) %>%
+df_historical_observations <- safe_open_dataset(db_name) %>%
   collect()
 df_observed_subbasins <- df_historical_observations %>% group_by(subbasin, variable) %>% slice(1) %>%
   dplyr::select(subbasin, variable)
@@ -61,10 +71,10 @@ df_historical_observations$date <- as.Date(df_historical_observations$date)
 #df_projections_percentile$period <- paste0(df_projections_percentile$start_year, "-", df_projections_percentile$end_year)
 
 # Keep Arrow dataset handles open once to avoid repeated metadata scans in renderers.
-ds_proj_forcing <- open_dataset(here("data/DB_Proj_Forcing"))
-ds_proj_year <- open_dataset(here("data/DB_Proj_Year"))
-ds_proj_month <- open_dataset(here("data/DB_Proj_Month"))
-ds_proj_percentiles <- open_dataset(here("data/DB_Proj_Percentiles"))
+ds_proj_forcing <- safe_open_dataset(here("data/DB_Proj_Forcing"))
+ds_proj_year <- safe_open_dataset(here("data/DB_Proj_Year"))
+ds_proj_month <- safe_open_dataset(here("data/DB_Proj_Month"))
+ds_proj_percentiles <- safe_open_dataset(here("data/DB_Proj_Percentiles"))
 
 # read map input
 df_map_input <- read_parquet(here("data/Subbasin_Extremes.gz.parquet"))
@@ -82,7 +92,7 @@ build_tabular_download <- function(dl_variable) {
     dl_variable_label <- unname(dl_lookup[dl_variable])
 
     df_download <- ds_proj_forcing %>%
-      filter(variable == dl_variable_label) %>%
+      filter(variable == dl_variable_label, time_aggregation == "monthly") %>%
       select(subbasin, ssp, period, month, variable, p50, unit) %>%
       collect() %>%
       rename("scenario" = ssp, "value" = p50)
@@ -254,10 +264,11 @@ ui <- page_navbar(
   # General aesthetics
   id = "main_nav",
   title = "ECOMIX Explorer",
-  bg = "#2D89C8",
+  bg = "#A26BCDFF", # Background color of the navbar
   inverse = TRUE, # This inverts the colors - looks nicer
+  tags$style(HTML("\n    .de-summary-boxes .value-box,\n    .de-summary-boxes .bslib-value-box {\n      height: 78px !important;\n      min-height: 78px !important;\n      max-height: 78px !important;\n      overflow: hidden;\n    }\n    .de-summary-boxes .value-box .card-body,\n    .de-summary-boxes .bslib-value-box .card-body {\n      padding-top: 0.45rem;\n      padding-bottom: 0.45rem;\n    }\n  ")),
   
-  ## Definition of the Tabs
+  ## Definition of the Tabs 
   
   # Panel 1: Map for subbasin selection
   nav_panel(title = "Map", 
@@ -328,28 +339,31 @@ ui <- page_navbar(
               ## Add the page content here
               
               ## Heading Widgets - General Information
-              layout_columns(
-                fill = FALSE,
-                value_box(
-                  title = "Selected Subbasin",
-                  value = textOutput("text_subbasin"),
-                  # showcase = bsicons::bs_icon("pin-map-fill")
-                ),
-                value_box(
-                  title = "Upstream Area",
-                  value = textOutput("text_upstream_area"),
-                  # showcase = bsicons::bs_icon("hexagon")
-                ),
-                value_box(
-                  title = "Average precipitation",
-                  value = textOutput("text_precip"),
-                  # showcase = bsicons::bs_icon("cloud-hail-fill")
-                ),
-                value_box(
-                  title = "Annual Temperature",
-                  value = textOutput("text_maat"),
-                  #showcase = bsicons::bs_icon("brightness-high-fill")
-                  # showcase = bsicons::bs_icon("thermometer-half")
+              div(
+                class = "de-summary-boxes",
+                layout_columns(
+                  fill = FALSE,
+                  value_box(
+                    title = "Selected Subcatchment",
+                    value = textOutput("text_subbasin"),
+                    # showcase = bsicons::bs_icon("pin-map-fill")
+                  ),
+                  value_box(
+                    title = "Upstream Area",
+                    value = textOutput("text_upstream_area"),
+                    # showcase = bsicons::bs_icon("hexagon")
+                  ),
+                  value_box(
+                    title = "Average precipitation",
+                    value = textOutput("text_precip"),
+                    # showcase = bsicons::bs_icon("cloud-hail-fill")
+                  ),
+                  value_box(
+                    title = "Annual Temperature",
+                    value = textOutput("text_maat"),
+                    #showcase = bsicons::bs_icon("brightness-high-fill")
+                    # showcase = bsicons::bs_icon("thermometer-half")
+                  )
                 )
               ),
               
@@ -747,7 +761,10 @@ server <- function(input, output, session) {
     } else{
       
       # plotting
-      upper <- max(c(df_plot$sim_P90, df_plot$obs), na.rm = T)
+      if (nrow(df_plot) == 0 || all(is.na(c(df_plot$sim_P90, df_plot$obs)))) {
+        return(NULL)
+      }
+      upper <- max(c(df_plot$sim_P90, df_plot$obs), na.rm = TRUE)
       ylab <- paste0(unique(df_plot$variable), " [", unique(df_plot$unit), "]")
       ggplot(df_plot, aes(x = date, y = sim_P50)) +
         geom_line(color = "#FC766AFF") + 
@@ -805,7 +822,6 @@ server <- function(input, output, session) {
       
       
       ylab <- paste0(sub_scenarios, " [", unique(df_plot$unit), "]")
-      library(ggsci)
       ggplot(df_plot, aes(x = year, y = p50_ensemble, color = ssp, fill = ssp, linetype = percentile_label)) +
         geom_line() +
         geom_ribbon(aes(ymin = p10_ensemble, ymax = p90_ensemble), alpha = 0.2, linewidth = 0.05)+
@@ -898,7 +914,6 @@ server <- function(input, output, session) {
       
       
       ylab <- paste0(sub_variable, " [", unique(df_plot$unit), "]")
-      library(ggsci)
       ggplot(df_plot, aes(x = month, y = p50_ensemble, color = scenario, fill = scenario, linetype = percentile_label)) +
         geom_line() +
         geom_ribbon(aes(ymin = p10_ensemble, ymax = p90_ensemble), alpha = 0.2, linewidth = 0.05)+
@@ -1115,6 +1130,7 @@ server <- function(input, output, session) {
 
     # Subbasin spatial exports include all subbasins and per-subbasin summaries.
     tab_summary_by_sub <- tab_data %>%
+      mutate(subbasin = as.integer(subbasin)) %>%
       group_by(subbasin) %>%
       summarise(
         n_records = n(),
@@ -1126,6 +1142,7 @@ server <- function(input, output, session) {
       )
 
     subbasin_shp %>%
+      mutate(Id = as.integer(Id)) %>%
       left_join(tab_summary_by_sub, by = c("Id" = "subbasin")) %>%
       mutate(spatial_layer = input$dl_spatial_layer,
              variable = input$dl_variable)
@@ -1148,7 +1165,17 @@ server <- function(input, output, session) {
       return(data.frame("V1" = "No spatial data available for this subbasin", "V2" = NA))
     }
 
-    sf::st_drop_geometry(df_spatial)
+    df_spatial_tbl <- sf::st_drop_geometry(df_spatial)
+    if (all(c("value_mean", "value_min", "value_max") %in% names(df_spatial_tbl))) {
+      df_spatial_tbl <- df_spatial_tbl %>%
+        filter(!(is.na(value_mean) & is.na(value_min) & is.na(value_max)))
+    }
+
+    if (nrow(df_spatial_tbl) == 0) {
+      return(data.frame("V1" = "No spatial rows with values are available for this selection", "V2" = NA))
+    }
+
+    df_spatial_tbl
   })
 
   output$download_data <- downloadHandler(
@@ -1189,19 +1216,22 @@ server <- function(input, output, session) {
           stop("No spatial data available for the selected subbasin.")
         }
 
+        # Export all spatial outputs in British National Grid.
+        df_spatial_export <- sf::st_transform(df_spatial, 27700)
+
         if (input$dl_format == "shp") {
           tmp_dir <- tempfile("ecomix_shp_")
           dir.create(tmp_dir)
           shp_path <- file.path(tmp_dir, "ecomix_spatial.shp")
-          sf::st_write(df_spatial, dsn = shp_path, driver = "ESRI Shapefile", quiet = TRUE, delete_layer = TRUE)
+          sf::st_write(df_spatial_export, dsn = shp_path, driver = "ESRI Shapefile", quiet = TRUE, delete_layer = TRUE)
           shp_files <- list.files(tmp_dir, full.names = TRUE)
           zip_tmp <- tempfile(fileext = ".zip")
           utils::zip(zipfile = zip_tmp, files = shp_files)
           file.copy(zip_tmp, file, overwrite = TRUE)
         } else if (input$dl_format == "gpkg") {
-          sf::st_write(df_spatial, dsn = file, driver = "GPKG", quiet = TRUE, delete_dsn = TRUE)
+          sf::st_write(df_spatial_export, dsn = file, driver = "GPKG", quiet = TRUE, delete_dsn = TRUE)
         } else {
-          sf::st_write(df_spatial, dsn = file, driver = "Parquet", quiet = TRUE, delete_dsn = TRUE)
+          sf::st_write(df_spatial_export, dsn = file, driver = "Parquet", quiet = TRUE, delete_dsn = TRUE)
         }
       }
     }
