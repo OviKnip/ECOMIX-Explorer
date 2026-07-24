@@ -13,6 +13,7 @@ library(DT)
 library(ggplot2)
 library(here)
 library(arrow)
+library(tidyr)
 
 # Decimal numbers
 options(scipen = 999)
@@ -24,6 +25,22 @@ safe_open_dataset <- function(dataset_path) {
       exclude_invalid_files = TRUE,
       selector_ignore_prefixes = c(".", "_")
     )
+  )
+}
+
+# Some parquet columns in DB_Proj_Forcing (e.g. p10/p50/p90) were written with
+# a stray R "names" attribute (leftover from quantile() output), which Arrow
+# can't round-trip and reports as "Invalid metadata$r" on every collect(). The
+# values themselves are unaffected, so muffle just this known warning here
+# rather than at every call site, while letting any other warning through.
+collect_quiet <- function(x) {
+  withCallingHandlers(
+    collect(x),
+    warning = function(w) {
+      if (grepl("Invalid metadata\\$r", conditionMessage(w))) {
+        invokeRestart("muffleWarning")
+      }
+    }
   )
 }
 
@@ -54,6 +71,110 @@ df_stats_lc$subbasin <- as.numeric(gsub("X", "", df_stats_lc$subbasin))
 df_temp <- read.csv(here("data/Dummy_Data_TT2.csv"))
 df_temp$date <- as.Date(df_temp$date)
 
+# ---- Chemical / physicochemical monitoring dataset ----
+#
+# Raw monitoring data is read as all-character columns so that "ND"
+# (non-detect) values sit alongside numeric concentrations without read.csv
+# silently coercing an entire analyte column to NA.
+df_monitoring_raw <- read.csv(
+  here("data/monitoring/comix_monitoring_data_Dashboard.csv"),
+  colClasses = "character",
+  check.names = FALSE
+)
+colnames(df_monitoring_raw)[1] <- "Site_id" # first header cell carries a stray BOM
+
+# The file's final row is a footnote about the ND/NA convention, not a real
+# monitoring record - drop any row without a parseable latitude.
+df_monitoring_raw <- df_monitoring_raw[
+  !is.na(suppressWarnings(as.numeric(df_monitoring_raw$Latitude))),
+]
+
+monitoring_meta_cols <- c("Site_id", "Site_full_name", "Latitude", "Longitude", "Week_Month", "Date")
+monitoring_physchem_cols <- tail(setdiff(names(df_monitoring_raw), monitoring_meta_cols), 7)
+monitoring_chemical_cols <- setdiff(names(df_monitoring_raw), c(monitoring_meta_cols, monitoring_physchem_cols))
+
+df_monitoring_raw$Date <- as.Date(df_monitoring_raw$Date, format = "%d/%m/%Y")
+df_monitoring_raw$Latitude <- as.numeric(df_monitoring_raw$Latitude)
+df_monitoring_raw$Longitude <- as.numeric(df_monitoring_raw$Longitude)
+
+# Strip the stray unit suffix baked into the "6PPD-Q" column name for display only.
+monitoring_parameter_label <- function(x) sub("_ng L⁻¹$", "", x)
+
+# One row per site, for the monitoring map.
+df_monitoring_sites <- df_monitoring_raw %>%
+  dplyr::select(Site_id, Site_full_name, Latitude, Longitude) %>%
+  dplyr::distinct(Site_id, .keep_all = TRUE)
+
+# Tidy long format: one row per site/date/parameter, with a detection status
+# derived from the raw string ("ND" -> non-detect, blank -> no sample taken).
+df_monitoring_long <- df_monitoring_raw %>%
+  tidyr::pivot_longer(
+    cols = dplyr::all_of(c(monitoring_chemical_cols, monitoring_physchem_cols)),
+    names_to = "parameter",
+    values_to = "value_raw"
+  ) %>%
+  dplyr::mutate(
+    parameter_group = ifelse(parameter %in% monitoring_physchem_cols,
+                              "Physicochemical parameter", "Organic micropollutant"),
+    parameter_label = monitoring_parameter_label(parameter),
+    status = dplyr::case_when(
+      is.na(value_raw) | value_raw == "" ~ "No sample",
+      value_raw == "ND" ~ "Non-detect",
+      TRUE ~ "Detected"
+    ),
+    value_num = dplyr::case_when(
+      status == "Detected" ~ suppressWarnings(as.numeric(value_raw)),
+      status == "Non-detect" ~ 0,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  dplyr::select(Site_id, Site_full_name, Latitude, Longitude, Date,
+                parameter, parameter_label, parameter_group, status, value_num)
+
+# Dropdown choices for the Site Details chemical/parameter selector, grouped
+# to match parameter_group above.
+monitoring_chemical_choices <- list(
+  "Organic micropollutants" = setNames(monitoring_chemical_cols, monitoring_parameter_label(monitoring_chemical_cols)),
+  "Physicochemical parameters" = setNames(monitoring_physchem_cols, monitoring_physchem_cols)
+)
+
+# Site background information (dummy placeholder data - see file header of
+# sitesInfo.txt). Parsed once at startup into a named list keyed by Site_id.
+parse_site_info <- function(path) {
+  lines <- readLines(path, encoding = "UTF-8")
+  lines <- lines[!grepl("^\\s*#", lines)] # drop comment lines
+  block_starts <- grep("^### ", lines)
+
+  site_info <- list()
+  for (i in seq_along(block_starts)) {
+    site_id <- sub("^### ", "", lines[block_starts[i]])
+    start <- block_starts[i] + 1
+    end <- if (i < length(block_starts)) block_starts[i + 1] - 1 else length(lines)
+    block_lines <- lines[start:end]
+    block_lines <- block_lines[nzchar(trimws(block_lines))]
+
+    # Split each "Key: Value" line on the first colon only, so summary text
+    # containing colons is not truncated.
+    parsed <- regmatches(block_lines, regexec("^([^:]+):\\s*(.*)$", block_lines))
+    keys <- vapply(parsed, `[`, character(1), 2)
+    values <- vapply(parsed, `[`, character(1), 3)
+    names(values) <- trimws(keys)
+
+    landcover_idx <- grepl("^Land cover", names(values))
+    landcover_names <- gsub("^Land cover - | \\(%\\)$", "", names(values)[landcover_idx])
+
+    site_info[[site_id]] <- list(
+      site_name = unname(values["Site"]),
+      summary = unname(values["Summary"]),
+      population = unname(values["Population (catchment)"]),
+      landcover = setNames(as.numeric(values[landcover_idx]), landcover_names)
+    )
+  }
+  site_info
+}
+
+monitoring_site_info <- parse_site_info(here("data/monitoring/sitesInfo.txt"))
+
 # Updates
 
 # Historical simulations at observation sites
@@ -76,6 +197,46 @@ ds_proj_year <- safe_open_dataset(here("data/DB_Proj_Year"))
 ds_proj_month <- safe_open_dataset(here("data/DB_Proj_Month"))
 ds_proj_percentiles <- safe_open_dataset(here("data/DB_Proj_Percentiles"))
 
+# Derive dynamic widget choices from the Hive-style partition directory names
+# on disk (e.g. ".../ssp=SSP585/period=2070-2080/..."). This is a plain
+# filesystem walk, so it stays fast even across datasets with tens of
+# thousands of parquet files - unlike running distinct()/collect() through
+# Arrow, which has to touch every fragment and is far too slow/memory-hungry
+# to run at app startup on these dataset sizes.
+get_partition_values <- function(dataset_dir, partition_key) {
+  dirs <- list.dirs(dataset_dir, recursive = TRUE, full.names = FALSE)
+  pattern <- paste0("(^|/)", partition_key, "=([^/]+)$")
+  matched <- dirs[grepl(pattern, dirs)]
+  if (length(matched) == 0) return(character(0))
+
+  vals <- sub(paste0(".*", partition_key, "="), "", matched)
+  vals <- utils::URLdecode(vals)
+  vals <- unique(vals)
+  vals <- vals[!is.na(vals) & nzchar(vals)]
+  sort(vals)
+}
+
+available_scenarios <- sort(unique(c(
+  get_partition_values(here("data/DB_Proj_Forcing"), "ssp"),
+  get_partition_values(here("data/DB_Proj_Year"), "ssp"),
+  get_partition_values(here("data/DB_Proj_Month"), "ssp"),
+  get_partition_values(here("data/DB_Proj_Percentiles"), "ssp")
+)))
+
+if (length(available_scenarios) == 0) {
+  available_scenarios <- c("Baseline", "SSP126", "SSP585")
+}
+
+climate_period_choices <- get_partition_values(here("data/DB_Proj_Forcing"), "period")
+if (length(climate_period_choices) == 0) {
+  climate_period_choices <- c("2000-2022", "2020-2029", "2030-2039", "2040-2049", "2050-2059", "2060-2069", "2070-2080")
+}
+
+prediction_period_choices <- setdiff(get_partition_values(here("data/DB_Proj_Month"), "period"), "2000-2022")
+if (length(prediction_period_choices) == 0) {
+  prediction_period_choices <- c("2020-2029", "2030-2039", "2040-2049", "2050-2059", "2060-2069", "2070-2080")
+}
+
 # read map input
 df_map_input <- read_parquet(here("data/Subbasin_Extremes.gz.parquet"))
 df_map_input <- df_map_input %>% filter(prediction_percentile == 99.9,
@@ -94,7 +255,7 @@ build_tabular_download <- function(dl_variable) {
     df_download <- ds_proj_forcing %>%
       filter(variable == dl_variable_label, time_aggregation == "monthly") %>%
       select(subbasin, ssp, period, month, variable, p50, unit) %>%
-      collect() %>%
+      collect_quiet() %>%
       rename("scenario" = ssp, "value" = p50)
   } else {
     hype_lookup <- c(
@@ -138,9 +299,8 @@ get_tabular_download <- function(dl_variable) {
 widget_scenario <-  selectizeInput(
   inputId =  "scenario", # This is used in the server part as reactive element (i.e. input$variable)
   label = "Choose multiple scenarios (press del to remove variable)",
-  choices =
-    c("Baseline", "SSP126", "SSP585"),
-  selected = "Baseline", 
+  choices = available_scenarios,
+  selected = if ("Baseline" %in% available_scenarios) "Baseline" else available_scenarios[1],
   multiple = TRUE)
 
 # Widget for card 1 -  climate variable (drop down menu - only one selection)
@@ -164,9 +324,8 @@ widget_climate_resolution <- selectInput(
 widget_climate_period <- selectInput(
   inputId = "climate_period", # This is used in the server part as reactive element (i.e. input$variable)
   label = "Select the period(s)",
-  choices =
-    c("2000-2022", "2020-2029", "2030-2039", "2040-2049", "2050-2059", "2060-2069", "2070-2080"),
-  selected = "2000-2022",
+  choices = climate_period_choices,
+  selected = if ("2000-2022" %in% climate_period_choices) "2000-2022" else climate_period_choices[1],
   multiple = TRUE)
 
 # Widget for card 2 - observational variables 
@@ -182,15 +341,43 @@ widget_observed_variable <- selectizeInput(
 ## Widgets for card 3 - Tab 1
 
 # HYPE output variable
-widget_prediction_variable <- selectInput(
-  inputId = "prediction_variable", # This is used in the server part as reactive element (i.e. input$variable)
+# NOTE: this control is shown in four different places (Yearly, Monthly, and
+# Distributions tabs, plus the Spatial Datasets panel). nav_panel() renders
+# all tabs into the DOM at once, so reusing a single selectInput() object
+# would create four elements sharing one HTML id - Shiny's client JS resolves
+# ids via the first DOM match, so only one of the four would stay in sync
+# with input$prediction_variable after a change. Each location therefore gets
+# its own inputId.
+prediction_variable_choices <- c(
+  "Discharge" = "discharge",
+  "Soil Moisture" = "Soil moisture",
+  "Water Temperature" = "water temperature",
+  "Susp. Sediments" =  "Susp. Sediments",
+  "Inorganic Nitrogen" = "Inorganic Nitrogen"
+)
+
+widget_prediction_variable_yearly <- selectInput(
+  inputId = "prediction_variable_yearly",
   label = "Select a variable",
-  choices =
-    c("Discharge" = "discharge",
-      "Soil Moisture" = "Soil moisture",
-      "Water Temperature" = "water temperature",
-      "Susp. Sediments" =  "Susp. Sediments", 
-      "Inorganic Nitrogen" = "Inorganic Nitrogen"),
+  choices = prediction_variable_choices,
+  selected = "Discharge")
+
+widget_prediction_variable_monthly <- selectInput(
+  inputId = "prediction_variable_monthly",
+  label = "Select a variable",
+  choices = prediction_variable_choices,
+  selected = "Discharge")
+
+widget_prediction_variable_dist <- selectInput(
+  inputId = "prediction_variable_dist",
+  label = "Select a variable",
+  choices = prediction_variable_choices,
+  selected = "Discharge")
+
+widget_prediction_variable_spatial <- selectInput(
+  inputId = "prediction_variable_spatial",
+  label = "Select a variable",
+  choices = prediction_variable_choices,
   selected = "Discharge")
 
 # Output conditions - i.e. Prediction percentile 
@@ -208,9 +395,8 @@ widget_prediction_percentile <- selectInput(
 widget_prediction_period <- selectInput(
   inputId = "prediction_period", # This is used in the server part as reactive element (i.e. input$variable)
   label = "Select the period(s)",
-  choices =
-    c("2020-2029", "2030-2039", "2040-2049", "2050-2059", "2060-2069", "2070-2080"),
-  selected = "2070-2080",
+  choices = prediction_period_choices,
+  selected = if ("2070-2080" %in% prediction_period_choices) "2070-2080" else prediction_period_choices[1],
   multiple = TRUE)
 
 # Plot type (Absolute or relative change) 
@@ -313,11 +499,49 @@ ui <- page_navbar(
             
             # Credits
             tags$div(id="cite", 'Data compiled by Durham University (2026)'
-                     
+
             )),
-  
-  
-  ## Panel 2: Data explorer 
+
+  ## Panel 1b: Monitoring data - site map
+  nav_panel(title = "Monitoring",
+            fluid = TRUE,
+
+            # Map of all chemical-monitoring sites - click a marker to open its
+            # detailed record on the "Site Details" tab.
+            leafletOutput("monitoring_map", width = "100%", height = "100%"),
+
+            tags$div(id = "cite", 'Data compiled by Durham University (2026)')),
+
+  ## Panel 1c: Monitoring data - site detail view
+  nav_panel(title = "Site Details",
+            fluid = TRUE,
+
+            uiOutput("site_info_panel"),
+
+            card(
+              full_screen = TRUE,
+              card_header("Chemical occurrence grid"),
+              plotOutput("site_chem_grid", height = "900px")
+            ),
+
+            card(
+              card_header("Time series"),
+              layout_sidebar(
+                sidebar = sidebar(
+                  title = "Select parameter",
+                  selectInput(
+                    inputId = "site_detail_chemical",
+                    label = NULL,
+                    choices = monitoring_chemical_choices,
+                    selected = monitoring_chemical_cols[1]
+                  )
+                ),
+                plotOutput("site_time_series")
+              )
+            )),
+
+
+  ## Panel 2: Data explorer
   nav_panel(title = "Data Explorer", 
             fluid = TRUE,
             
@@ -414,11 +638,11 @@ ui <- page_navbar(
                               sidebar = sidebar(
                                 #title = "HYPE variable", 
                                 # Widget to select the HYPE output variable (drop down menu - only one selection)
-                                widget_prediction_variable,
+                                widget_prediction_variable_yearly,
                                 widget_prediction_percentile,
                                 widget_plot_type,
                               ),
-                              
+
                               plotOutput("projections_yearly_plot"),
                             ),
                   ),
@@ -430,12 +654,12 @@ ui <- page_navbar(
                               sidebar = sidebar(
                                 #title = "HYPE variable", 
                                 # Widget to select the HYPE output variable (drop down menu - only one selection)
-                                widget_prediction_variable,
+                                widget_prediction_variable_monthly,
                                 widget_prediction_period,
                                 widget_prediction_percentile,
                                 widget_plot_type,
                               ),
-                              
+
                               plotOutput("projections_monthly_plot"),
                             ),
                   ), 
@@ -447,10 +671,10 @@ ui <- page_navbar(
                               sidebar = sidebar(
                                 #title = "HYPE variable", 
                                 # Widget to select the HYPE output variable (drop down menu - only one selection)
-                                widget_prediction_variable,
+                                widget_prediction_variable_dist,
                                 widget_prediction_period
                               ),
-                              
+
                               plotOutput("projections_cfc_plot"),
                             ),
                   ), 
@@ -476,7 +700,7 @@ ui <- page_navbar(
                 helpText("Some instructions here"),
                 
                 # Interactive widget that lets select a hype output variable
-                widget_prediction_variable
+                widget_prediction_variable_spatial
               ),
               
               # Define the output map
@@ -546,6 +770,22 @@ server <- function(input, output, session) {
   
   # use reactive values to store the id from observing the shape click
   rv <- reactiveVal()
+
+  # Selected monitoring site (Site_id), set by clicking a marker on the
+  # Monitoring map; drives the Site Details tab.
+  rv_site <- reactiveVal()
+
+  # Expose the already-open Arrow dataset handles (opened once at startup) as
+  # a reactive so the plot renderers below can access them through a
+  # consistent projection_data$forcing / $year / $month / $percentiles API.
+  projection_sources <- reactive({
+    list(
+      forcing = ds_proj_forcing,
+      year = ds_proj_year,
+      month = ds_proj_month,
+      percentiles = ds_proj_percentiles
+    )
+  })
 
   selected_climate <- reactive({
     req(rv())
@@ -636,8 +876,128 @@ server <- function(input, output, session) {
                "Mean Annual Temperature: ", round(df_climate_tmp$maat[1], 2), " deg. C <br>",
                sep = ""))
   })
-  
-  
+
+
+  ### NAVBAR 1B - MONITORING DATA ###
+
+  # Map of all monitoring sites
+  output$monitoring_map <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
+      setView(lng = -1.16, lat = 53.75, zoom = 8) %>%
+      addCircleMarkers(
+        data = df_monitoring_sites,
+        lng = ~Longitude, lat = ~Latitude,
+        layerId = ~Site_id,
+        radius = 7,
+        color = "#A26BCDFF",
+        weight = 2,
+        fillOpacity = 0.8,
+        popup = ~paste0("<strong>", Site_full_name, "</strong><br>Click marker to view details")
+      )
+  })
+
+  # Track marker clicks and jump to the Site Details tab
+  observeEvent(input$monitoring_map_marker_click, {
+    rv_site(input$monitoring_map_marker_click$id)
+    bslib::nav_select("main_nav", selected = "Site Details", session = session)
+  })
+
+  # Full monitoring record (all parameters, all weeks) for the selected site
+  selected_site_long <- reactive({
+    req(rv_site())
+    df_monitoring_long %>% dplyr::filter(Site_id == rv_site())
+  })
+
+  # Site background panel - dummy placeholder data from sitesInfo.txt
+  output$site_info_panel <- renderUI({
+    if (is.null(rv_site())) {
+      return(tags$p("Please select a site on the Monitoring map to see its details."))
+    }
+
+    info <- monitoring_site_info[[rv_site()]]
+    if (is.null(info)) {
+      return(tags$p(paste("No site information available yet for", rv_site())))
+    }
+
+    landcover_text <- paste(
+      paste0(names(info$landcover), ": ", info$landcover, "%"),
+      collapse = " | "
+    )
+
+    tagList(
+      h2(info$site_name),
+      p(info$summary),
+      p(strong("Estimated catchment population: "), format(as.numeric(info$population), big.mark = ",")),
+      p(strong("Land cover: "), landcover_text)
+    )
+  })
+
+  # Chemical x week occurrence grid for the selected site. Colour is a
+  # log-scaled concentration relative to that parameter's own maximum at this
+  # site (0-1), so a single high-concentration compound doesn't wash out the
+  # colour scale for every other row. Non-detects sit at the bottom of the
+  # scale (true zero); missing samples are shown as a distinct flat grey via
+  # NA rather than being folded into the continuous scale.
+  output$site_chem_grid <- renderPlot({
+    df_grid <- selected_site_long() %>%
+      dplyr::group_by(parameter) %>%
+      dplyr::mutate(
+        max_detected = suppressWarnings(max(value_num[status == "Detected"], na.rm = TRUE)),
+        max_detected = ifelse(is.finite(max_detected) & max_detected > 0, max_detected, 1),
+        color_value = dplyr::if_else(
+          status == "No sample",
+          NA_real_,
+          log1p(pmax(value_num, 0)) / log1p(max_detected)
+        )
+      ) %>%
+      dplyr::ungroup()
+
+    parameter_order <- df_grid %>%
+      dplyr::distinct(parameter_label, parameter_group) %>%
+      dplyr::arrange(parameter_group, parameter_label) %>%
+      dplyr::pull(parameter_label)
+    df_grid$parameter_label <- factor(df_grid$parameter_label, levels = rev(parameter_order))
+
+    ggplot(df_grid, aes(x = Date, y = parameter_label, fill = color_value)) +
+      geom_tile(color = "white", linewidth = 0.15) +
+      scale_fill_viridis_c(
+        name = "Relative\nconcentration",
+        na.value = "grey85",
+        limits = c(0, 1)
+      ) +
+      scale_x_date(expand = c(0, 0)) +
+      labs(
+        x = "Sampling week", y = NULL,
+        caption = "Colour = log-scaled concentration relative to this site's own maximum for that parameter. Grey = no sample taken that week."
+      ) +
+      theme_bw(base_size = 11) +
+      theme(
+        axis.text.y = element_text(size = 8),
+        panel.grid = element_blank()
+      )
+  })
+
+  # Time series for the parameter chosen in the dropdown
+  output$site_time_series <- renderPlot({
+    req(input$site_detail_chemical)
+    df_ts <- selected_site_long() %>%
+      dplyr::filter(parameter == input$site_detail_chemical)
+
+    ggplot(df_ts, aes(x = Date, y = value_num)) +
+      geom_line(color = "#2171B5", na.rm = TRUE) +
+      geom_point(aes(color = status), size = 2) +
+      scale_color_manual(
+        name = "Status",
+        breaks = c("Detected", "Non-detect", "No sample"),
+        values = c("Detected" = "#2171B5", "Non-detect" = "#5B84B1FF", "No sample" = "grey60")
+      ) +
+      labs(x = "Date", y = unique(df_ts$parameter_label)[1]) +
+      theme_bw() +
+      theme(legend.position = "bottom", legend.title = element_blank())
+  })
+
+
   ### NAVBAR 2 - PLOTS ###
   
   ## Heading Widgets - General Information
@@ -654,12 +1014,12 @@ server <- function(input, output, session) {
   output$text_precip <- renderText({
     if (is.null(rv())) return (" ")
     df_climate_tmp <- selected_climate()
-    paste(as.character(round(df_climate_tmp$precip[1]), 0), "mm")
+    paste(as.character(round(df_climate_tmp$precip[1], 0)), "mm")
   })
   output$text_maat <- renderText({
     if (is.null(rv())) return (" ")
     df_climate_tmp <- selected_climate()
-    paste(as.character(round(df_climate_tmp$maat[1]), 1), "°C")
+    paste(as.character(round(df_climate_tmp$maat[1], 1)), "°C")
   })
   
   
@@ -669,6 +1029,8 @@ server <- function(input, output, session) {
     # Dont do anything if no subbasin was selected
     if (is.null(rv())) return ("Please select a subbasin by clicking on the map")
     
+    projection_data <- projection_sources()
+
     sub_subbasin <- rv()
     sub_climate_variable <- unique(input$climate_variable)
     sub_climate_resolution <- input$climate_resolution[1]
@@ -679,13 +1041,13 @@ server <- function(input, output, session) {
     }
     
     # open data
-    df_plot <- ds_proj_forcing %>% 
+    df_plot <- projection_data$forcing %>%
       filter(
         variable == sub_climate_variable,
-        subbasin %in% sub_subbasin, 
+        subbasin %in% sub_subbasin,
         ssp %in% sub_scenarios,
-        time_aggregation == sub_climate_resolution) %>% 
-      collect()
+        time_aggregation == sub_climate_resolution) %>%
+      collect_quiet()
     
     # Data wrangling
     if(sub_climate_resolution == "monthly") {
@@ -789,18 +1151,20 @@ server <- function(input, output, session) {
     # Dont do anything if no subbasin was selected
     if (is.null(rv())) return ("Please select a subbasin by clicking on the map")
     
+    projection_data <- projection_sources()
+
     # Filter dataset
     #df_plot <- df_projections_year %>% filter(subbasin == rv())
     
     # Subset the dataset based on widget inputs
     sub_subbasin <- rv()
-    sub_variable <- input$prediction_variable[1]
+    sub_variable <- input$prediction_variable_yearly[1]
     sub_scenarios <- unique(input$scenario)
     sub_percentiles <- unique(input$prediction_percentile)
     sub_plot_type <- unique(input$plot_type)
     
     # open database
-        df_projections_year <- ds_proj_year %>%
+        df_projections_year <- projection_data$year %>%
       filter(subbasin %in% sub_subbasin,
              hype_variable  %in% sub_variable,
              ssp %in% c("Baseline",sub_scenarios),
@@ -881,9 +1245,11 @@ server <- function(input, output, session) {
     # Dont do anything if no subbasin was selected
     if (is.null(rv())) return ("Please select a subbasin by clicking on the map")
     
+    projection_data <- projection_sources()
+
     # Store widget inputs
     sub_subbasin <- rv()
-    sub_variable <- input$prediction_variable[1]
+    sub_variable <- input$prediction_variable_monthly[1]
     sub_scenarios <- unique(input$scenario)
     sub_percentiles <- unique(input$prediction_percentile)
     sub_periods <- unique(input$prediction_period)
@@ -893,7 +1259,7 @@ server <- function(input, output, session) {
     }
     sub_plot_type <- unique(input$plot_type)
     
-        df_projections_month <- ds_proj_month %>%
+        df_projections_month <- projection_data$month %>%
       filter(subbasin %in% sub_subbasin, 
              hype_variable  %in% sub_variable, 
              ssp %in% c("Baseline", sub_scenarios),
@@ -979,16 +1345,18 @@ server <- function(input, output, session) {
     # Dont do anything if no subbasin was selected
     if (is.null(rv())) return ("Please select a subbasin by clicking on the map")
     
+    projection_data <- projection_sources()
+
     # Subset the dataset based on widget inputs
     sub_subbasin <- rv()
-    sub_variable <- input$prediction_variable[1]
+    sub_variable <- input$prediction_variable_dist[1]
     sub_scenarios <- unique(input$scenario)
     sub_periods <- unique(input$prediction_period)
     if ("Baseline" %in% sub_scenarios) {
       sub_periods <- c("2000-2022", sub_periods)
     }
     
-        df_plot <- ds_proj_percentiles %>% 
+        df_plot <- projection_data$percentiles %>% 
       filter(subbasin %in% sub_subbasin, 
              hype_variable  %in% sub_variable, 
              ssp %in% sub_scenarios,
@@ -1036,8 +1404,8 @@ server <- function(input, output, session) {
   
   ## Spatial variability map
   output$prediction_map <- renderLeaflet({
-    
-    sub_variable <- input$prediction_variable[1]
+
+    sub_variable <- input$prediction_variable_spatial[1]
     df_sub <- df_map_input %>% filter(hype_variable == sub_variable)
     shp_map <- left_join(subbasin_shp, df_sub, by = c("Id" = "subbasin")) %>% filter(!is.na(hype_variable))
     
@@ -1247,4 +1615,19 @@ server <- function(input, output, session) {
 # shiny::runApp()
 
 ### 3. Execution
-shiny::runApp(shinyApp(ui = ui, server = server), launch.browser = TRUE)
+app <- shinyApp(ui = ui, server = server)
+
+# Allow runApp(appDir = ...) launchers to source this file without recursively
+# starting a nested Shiny process.
+if (identical(Sys.getenv("ECOMIX_AUTORUN", "1"), "1")) {
+  shiny_host <- getOption("shiny.host", "127.0.0.1")
+  shiny_port <- getOption("shiny.port", NULL)
+  shiny::runApp(
+    app,
+    host = shiny_host,
+    port = shiny_port,
+    launch.browser = TRUE
+  )
+}
+
+app

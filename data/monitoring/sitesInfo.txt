@@ -1,0 +1,202 @@
+# sitesInfo.txt
+#
+# [DUMMY PLACEHOLDER DATA] -- This file does not yet contain real site
+# information. All summaries, population figures, and land cover percentages
+# below are illustrative placeholders generated for development purposes and
+# must be replaced with verified catchment data before this dashboard is used
+# for any real analysis or reporting.
+#
+# Format: one block per monitoring site, starting with "### <Site_id>" where
+# <Site_id> matches the Site_id column in comix_monitoring_data_Dashboard.csv.
+# Each block has "Key: Value" lines. "Land cover - X (%)" lines should sum to
+# ~100 for a given site.
+
+### Ai1
+Site: Aire 1
+Summary: [DUMMY PLACEHOLDER] Aire 1 sits on the upper River Aire downstream of Skipton, draining a catchment of mixed rural pasture and small market towns in the Yorkshire Dales foothills.
+Population (catchment): 18500
+Land cover - Urban (%): 12
+Land cover - Arable (%): 20
+Land cover - Grassland (%): 45
+Land cover - Woodland (%): 18
+Land cover - Water/Other (%): 5
+
+### Ai2
+Site: Aire 2
+Summary: [DUMMY PLACEHOLDER] Aire 2 is located as the river passes through Leeds, capturing inputs from a large urban and industrial catchment with several wastewater treatment works upstream.
+Population (catchment): 410000
+Land cover - Urban (%): 55
+Land cover - Arable (%): 10
+Land cover - Grassland (%): 20
+Land cover - Woodland (%): 8
+Land cover - Water/Other (%): 7
+
+### Ai3
+Site: Aire 3
+Summary: [DUMMY PLACEHOLDER] Aire 3 sits downstream of Castleford, draining the lower Aire catchment which combines former coalfield land, arable farmland, and continued urban discharge.
+Population (catchment): 520000
+Land cover - Urban (%): 48
+Land cover - Arable (%): 25
+Land cover - Grassland (%): 15
+Land cover - Woodland (%): 7
+Land cover - Water/Other (%): 5
+
+### Ca1
+Site: Calder 1
+Summary: [DUMMY PLACEHOLDER] Calder 1 is on the upper River Calder near Halifax, draining steep Pennine valleys with a mix of former textile-mill towns and upland moorland.
+Population (catchment): 145000
+Land cover - Urban (%): 30
+Land cover - Arable (%): 8
+Land cover - Grassland (%): 40
+Land cover - Woodland (%): 15
+Land cover - Water/Other (%): 7
+
+### Ca2
+Site: Calder 2
+Summary: [DUMMY PLACEHOLDER] Calder 2 sits further downstream near Wakefield, integrating additional urban, industrial, and agricultural inputs from the wider Calder valley.
+Population (catchment): 280000
+Land cover - Urban (%): 38
+Land cover - Arable (%): 22
+Land cover - Grassland (%): 25
+Land cover - Woodland (%): 10
+Land cover - Water/Other (%): 5
+
+### DwM
+Site: Derwent M
+Summary: [DUMMY PLACEHOLDER] Derwent M is a mid-catchment site on the River Derwent, draining a predominantly rural and agricultural landscape in the Vale of Pickering.
+Population (catchment): 32000
+Land cover - Urban (%): 6
+Land cover - Arable (%): 55
+Land cover - Grassland (%): 25
+Land cover - Woodland (%): 10
+Land cover - Water/Other (%): 4
+
+### DwU
+Site: Derwent U
+Summary: [DUMMY PLACEHOLDER] Derwent U is the upper River Derwent site within the North York Moors, characterised by moorland, forestry, and low population density.
+Population (catchment): 6500
+Land cover - Urban (%): 2
+Land cover - Arable (%): 10
+Land cover - Grassland (%): 30
+Land cover - Woodland (%): 35
+Land cover - Water/Other (%): 23
+
+### Fo1
+Site: Foss 1
+Summary: [DUMMY PLACEHOLDER] Foss 1 is on the upper River Foss north of York, draining low-lying arable land and small villages.
+Population (catchment): 9800
+Land cover - Urban (%): 8
+Land cover - Arable (%): 60
+Land cover - Grassland (%): 22
+Land cover - Woodland (%): 7
+Land cover - Water/Other (%): 3
+
+### Fo2
+Site: Foss 2
+Summary: [DUMMY PLACEHOLDER] Foss 2 is further downstream as the Foss approaches the outskirts of York, picking up additional urban runoff and agricultural drainage.
+Population (catchment): 45000
+Land cover - Urban (%): 25
+Land cover - Arable (%): 45
+Land cover - Grassland (%): 20
+Land cover - Woodland (%): 6
+Land cover - Water/Other (%): 4
+
+### Fo3
+Site: Foss 3
+Summary: [DUMMY PLACEHOLDER] Foss 3 sits within York itself, close to the confluence with the River Ouse, integrating the full urban and agricultural catchment above it.
+Population (catchment): 210000
+Land cover - Urban (%): 42
+Land cover - Arable (%): 35
+Land cover - Grassland (%): 14
+Land cover - Woodland (%): 5
+Land cover - Water/Other (%): 4
+
+### MbSf
+Site: MeersBrook
+Summary: [DUMMY PLACEHOLDER] MeersBrook drains a densely urbanised part of southern Sheffield, with limited green space and significant surface-water and combined-sewer influence.
+Population (catchment): 95000
+Land cover - Urban (%): 68
+Land cover - Arable (%): 3
+Land cover - Grassland (%): 15
+Land cover - Woodland (%): 10
+Land cover - Water/Other (%): 4
+
+### Ou
+Site: Ouse
+Summary: [DUMMY PLACEHOLDER] The Ouse site integrates the combined Aire, Wharfe, Nidd, and Foss catchments as the river flows through York, representing the largest and most mixed upstream catchment in the network.
+Population (catchment): 1250000
+Land cover - Urban (%): 30
+Land cover - Arable (%): 35
+Land cover - Grassland (%): 22
+Land cover - Woodland (%): 9
+Land cover - Water/Other (%): 4
+
+### Rye
+Site: Rye
+Summary: [DUMMY PLACEHOLDER] The Rye is a largely rural tributary of the Derwent draining Ryedale, with farmland, small towns, and the Howardian Hills.
+Population (catchment): 21000
+Land cover - Urban (%): 5
+Land cover - Arable (%): 45
+Land cover - Grassland (%): 30
+Land cover - Woodland (%): 15
+Land cover - Water/Other (%): 5
+
+### Sf
+Site: Sheaf
+Summary: [DUMMY PLACEHOLDER] The Sheaf runs through central Sheffield, a heavily urbanised catchment with historic industrial legacy inputs and extensive culverting.
+Population (catchment): 180000
+Land cover - Urban (%): 72
+Land cover - Arable (%): 2
+Land cover - Grassland (%): 12
+Land cover - Woodland (%): 10
+Land cover - Water/Other (%): 4
+
+### SwU
+Site: Swale
+Summary: [DUMMY PLACEHOLDER] Swale is an upland site draining the Yorkshire Dales, with extensive moorland and sheep grazing and very low population density.
+Population (catchment): 4200
+Land cover - Urban (%): 1
+Land cover - Arable (%): 4
+Land cover - Grassland (%): 45
+Land cover - Woodland (%): 20
+Land cover - Water/Other (%): 30
+
+### WhL
+Site: Wharfe L
+Summary: [DUMMY PLACEHOLDER] Wharfe L is a lower-catchment site on the River Wharfe, draining a mix of arable farmland and small settlements before the Wharfe joins the Ouse.
+Population (catchment): 62000
+Land cover - Urban (%): 18
+Land cover - Arable (%): 42
+Land cover - Grassland (%): 28
+Land cover - Woodland (%): 8
+Land cover - Water/Other (%): 4
+
+### WhM
+Site: Wharfe M
+Summary: [DUMMY PLACEHOLDER] Wharfe M sits near Ilkley and Otley, draining a catchment of market towns, pasture, and moorland fringe in mid-Wharfedale.
+Population (catchment): 54000
+Land cover - Urban (%): 20
+Land cover - Arable (%): 12
+Land cover - Grassland (%): 43
+Land cover - Woodland (%): 18
+Land cover - Water/Other (%): 7
+
+### WhU
+Site: Wharfe U
+Summary: [DUMMY PLACEHOLDER] Wharfe U is the upper Wharfedale site above Kettlewell, an upland catchment dominated by moorland and rough grazing with minimal urban influence.
+Population (catchment): 2800
+Land cover - Urban (%): 1
+Land cover - Arable (%): 3
+Land cover - Grassland (%): 40
+Land cover - Woodland (%): 16
+Land cover - Water/Other (%): 40
+
+### Wi
+Site: Wiske
+Summary: [DUMMY PLACEHOLDER] The Wiske drains low-relief arable land in the Vale of Mowbray, with dispersed villages and intensive agriculture as the dominant land use.
+Population (catchment): 15500
+Land cover - Urban (%): 6
+Land cover - Arable (%): 65
+Land cover - Grassland (%): 20
+Land cover - Woodland (%): 6
+Land cover - Water/Other (%): 3
