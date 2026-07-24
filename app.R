@@ -48,10 +48,32 @@ collect_quiet <- function(x) {
 ## Load required datasets
 
 # Study area
-catchment_shp <- read_sf(dsn = here("data"), layer = "Wharfe_catchments_wgs")
+catchment_shp <- read_sf(dsn = here("data"), layer = "catchments_wgs")
 
 # HYPE Subbasins (modelling units)
-subbasin_shp <- read_sf(dsn = here("data"), layer = "Wharfe_subbasins_wgs")
+subbasin_shp <- read_sf(dsn = here("data"), layer = "subbasins_wgs")
+
+# WFD surface water operational catchments (Environment Agency WFS),
+# pre-filtered to the ones overlapping the study catchments, and each
+# subbasin's dominant associated operational catchment (by shared area) -
+# both produced by scripts/fetch_operational_catchments.R rather than
+# fetched live, so the map doesn't depend on the WFS being reachable at app
+# start.
+opcat_shp <- read_sf(dsn = here("data"), layer = "operational_catchments_wgs")
+
+df_subbasin_opcat <- read.csv(here("data/subbasin_operational_catchment.csv"))
+
+# Subbasin polygons joined to their associated operational catchment, used to
+# colour the Map page. A shared factor palette lets the operational catchment
+# overlay and the subbasin fills use matching colours.
+subbasin_opcat_shp <- subbasin_shp %>%
+  left_join(df_subbasin_opcat, by = c("Id" = "subbasin"))
+
+opcat_levels <- sort(unique(na.omit(subbasin_opcat_shp$opcat_name)))
+pal_opcat <- colorFactor(
+  palette = grDevices::rainbow(length(opcat_levels), s = 0.6, v = 0.85),
+  domain = opcat_levels
+)
 
 # Table with climate information
 df_stats_climate <- read.csv(here("data/subbasin_climate.csv"))
@@ -131,9 +153,9 @@ df_monitoring_long <- df_monitoring_raw %>%
   dplyr::select(Site_id, Site_full_name, Latitude, Longitude, Date,
                 parameter, parameter_label, parameter_group, status, value_num)
 
-# Dropdown choices for the Site Details chemical/parameter selector, grouped
-# to match parameter_group above.
-monitoring_chemical_choices <- list(
+# Grouped choices for the Site Details time series chemical/parameter
+# selectors below.
+monitoring_parameter_choices <- list(
   "Organic micropollutants" = setNames(monitoring_chemical_cols, monitoring_parameter_label(monitoring_chemical_cols)),
   "Physicochemical parameters" = setNames(monitoring_physchem_cols, monitoring_physchem_cols)
 )
@@ -142,7 +164,7 @@ monitoring_chemical_choices <- list(
 # sitesInfo.txt). Parsed once at startup into a named list keyed by Site_id.
 parse_site_info <- function(path) {
   lines <- readLines(path, encoding = "UTF-8")
-  lines <- lines[!grepl("^\\s*#", lines)] # drop comment lines
+  lines <- lines[!(grepl("^\\s*#", lines) & !grepl("^### ", lines))] # drop comment lines, keep block headers
   block_starts <- grep("^### ", lines)
 
   site_info <- list()
@@ -498,7 +520,7 @@ ui <- page_navbar(
             ),
             
             # Credits
-            tags$div(id="cite", 'Data compiled by Durham University (2026)'
+            tags$div(id="cite", 'Data compiled by Durham University (2026). Operational catchment boundaries © Environment Agency copyright and/or database right 2026, licensed under the Open Government Licence v3.0'
 
             )),
 
@@ -516,27 +538,58 @@ ui <- page_navbar(
   nav_panel(title = "Site Details",
             fluid = TRUE,
 
-            uiOutput("site_info_panel"),
-
-            card(
-              full_screen = TRUE,
-              card_header("Chemical occurrence grid"),
-              plotOutput("site_chem_grid", height = "900px")
+            # Lets the user switch sites directly from this tab, without
+            # having to go back to the Monitoring map. Stays in sync with
+            # marker clicks on that map (see the server-side observers).
+            selectInput(
+              inputId = "site_detail_selector",
+              label = "Select monitoring site",
+              choices = setNames(df_monitoring_sites$Site_id, df_monitoring_sites$Site_full_name),
+              width = "300px"
             ),
 
-            card(
-              card_header("Time series"),
-              layout_sidebar(
-                sidebar = sidebar(
-                  title = "Select parameter",
-                  selectInput(
-                    inputId = "site_detail_chemical",
-                    label = NULL,
-                    choices = monitoring_chemical_choices,
-                    selected = monitoring_chemical_cols[1]
-                  )
+            # Site background (left) + a small locator map (upper right)
+            layout_columns(
+              col_widths = c(8, 4),
+              uiOutput("site_info_panel"),
+              card(
+                card_header("Site location"),
+                leafletOutput("site_mini_map", height = "220px")
+              )
+            ),
+
+            # Occurrence grid (kept close to square so row labels can be
+            # bigger) alongside a vertical stack of time series for the four
+            # chemicals with the greatest concentration range at this site.
+            layout_columns(
+              col_widths = c(6, 6),
+              card(
+                full_screen = TRUE,
+                card_header("Chemical occurrence grid"),
+                div(
+                  style = "position: relative;",
+                  plotOutput(
+                    "site_chem_grid",
+                    height = "900px",
+                    hover = hoverOpts(id = "site_chem_grid_hover", delay = 60, delayType = "debounce")
+                  ),
+                  uiOutput("site_chem_grid_tooltip")
+                )
+              ),
+              card(
+                card_header("Time series"),
+                helpText(
+                  "Defaults to the four chemicals with the greatest concentration range at this site - ",
+                  "change any of the four selectors below to plot a different chemical or parameter."
                 ),
-                plotOutput("site_time_series")
+                layout_columns(
+                  col_widths = c(3, 3, 3, 3),
+                  selectInput("site_ts_chemical_1", "Panel 1", choices = monitoring_parameter_choices),
+                  selectInput("site_ts_chemical_2", "Panel 2", choices = monitoring_parameter_choices),
+                  selectInput("site_ts_chemical_3", "Panel 3", choices = monitoring_parameter_choices),
+                  selectInput("site_ts_chemical_4", "Panel 4", choices = monitoring_parameter_choices)
+                ),
+                plotOutput("site_time_series", height = "820px")
               )
             )),
 
@@ -746,9 +799,16 @@ ui <- page_navbar(
     )
   ),
   
+  ## PANEL 6: Help
+  nav_panel(
+    title = "Help",
+    fluid = TRUE,
+    includeHTML(here("help.htm"))
+  ),
+
   nav_spacer(),
-  
-  ## Navigation menu 
+
+  ## Navigation menu
   nav_menu(
     title = "Links",
     align = "right",
@@ -838,39 +898,60 @@ server <- function(input, output, session) {
     )
   })
   
-  # Create the map (catchment part works)
+  # Create the map. Subbasins are coloured by their associated WFD
+  # operational catchment (see subbasin_opcat_shp above); the operational
+  # catchment boundaries themselves are an optional overlay via the layers
+  # control.
   output$basemap <- renderLeaflet({
     leaflet() %>%
       addTiles() %>%
       setView(lng = -1.16, lat = 53.75, zoom = 8.5) %>%
-      addPolygons(data=subbasin_shp,
+      addPolygons(data = subbasin_opcat_shp,
                   fill = T, # Has to be filled to get the hitmarker
-                  fillOpacity = 0.01,
+                  fillColor = ~ifelse(is.na(opcat_name), "#cccccc", pal_opcat(opcat_name)),
+                  fillOpacity = 0.5,
                   color = "black",
                   opacity =  0.5,
-                  weight = 2,
+                  weight = 1,
                   popup = ~paste0(
                     "<strong>Subbasin id: </strong>", Id,
+                    "<br><strong>Operational catchment: </strong>", ifelse(is.na(opcat_name), "None", opcat_name),
                     "<br><a href='#' onclick=\"Shiny.setInputValue('open_data_explorer', '",
                     Id,
                     "', {priority: 'event'}); return false;\">Open in Data Explorer</a>"
                   ),
-                  layerId = ~Id)
+                  layerId = ~Id,
+                  group = "Subbasins") %>%
+      addPolygons(data = opcat_shp,
+                  fill = FALSE,
+                  color = ~pal_opcat(opcat_name),
+                  weight = 3,
+                  opacity = 0.9,
+                  label = ~opcat_name,
+                  group = "Operational catchments (WFS)") %>%
+      addLayersControl(
+        overlayGroups = "Operational catchments (WFS)",
+        options = layersControlOptions(collapsed = FALSE)
+      ) %>%
+      hideGroup("Operational catchments (WFS)")
   })
-  
-  
+
+
   # Map information output
   output$selected_subbasin <- renderUI({
-    
-    # If no subbasin was selected 
+
+    # If no subbasin was selected
     if (is.null(rv())) return ("Please select a subbasin by clicking on the map")
-    
-    # If subbasin is selected 
+
+    # If subbasin is selected
     # Subset data
     df_climate_tmp <- selected_climate()
     df_stats_lc_tmp <- selected_lc()
-    
+    df_opcat_tmp <- df_subbasin_opcat %>% filter(subbasin == rv())
+    opcat_label <- if (nrow(df_opcat_tmp) == 0 || is.na(df_opcat_tmp$opcat_name[1])) "None" else df_opcat_tmp$opcat_name[1]
+
     HTML(paste("Selected polygon: ", rv(), "<br>",
+               "Operational catchment: ", opcat_label, "<br>",
                "Upstream area: ", round(df_stats_lc_tmp$value[df_stats_lc_tmp$variable == "Upstream area"] / 1000000, 2), " km2 <br>",
                "Annual Precipitation: ", round(df_climate_tmp$precip[1], 0), "mm <br>",
                "Mean Annual Temperature: ", round(df_climate_tmp$maat[1], 2), " deg. C <br>",
@@ -903,6 +984,28 @@ server <- function(input, output, session) {
     bslib::nav_select("main_nav", selected = "Site Details", session = session)
   })
 
+  # The Site Details dropdown is another way to set rv_site() directly...
+  observeEvent(input$site_detail_selector, {
+    rv_site(input$site_detail_selector)
+  })
+
+  # ...and this keeps it showing the right site when rv_site() instead comes
+  # from a marker click on the Monitoring map. It also resets the four time
+  # series selectors to that site's top-range chemicals, so switching sites
+  # gives a fresh, sensible default rather than carrying over the previous
+  # site's picks (the user can still override any of the four afterwards).
+  observeEvent(rv_site(), {
+    updateSelectInput(session, "site_detail_selector", selected = rv_site())
+
+    top4 <- selected_site_top_chemicals()$parameter
+    if (length(top4) < 4) {
+      top4 <- c(top4, setdiff(monitoring_chemical_cols, top4))[seq_len(4)]
+    }
+    for (i in seq_len(4)) {
+      updateSelectInput(session, paste0("site_ts_chemical_", i), selected = top4[i])
+    }
+  }, ignoreNULL = TRUE)
+
   # Full monitoring record (all parameters, all weeks) for the selected site
   selected_site_long <- reactive({
     req(rv_site())
@@ -933,13 +1036,50 @@ server <- function(input, output, session) {
     )
   })
 
-  # Chemical x week occurrence grid for the selected site. Colour is a
+  # Small locator map for the selected site
+  output$site_mini_map <- renderLeaflet({
+    req(rv_site())
+    site_row <- df_monitoring_sites %>% dplyr::filter(Site_id == rv_site())
+    req(nrow(site_row) == 1)
+
+    leaflet() %>%
+      addTiles() %>%
+      setView(lng = site_row$Longitude, lat = site_row$Latitude, zoom = 11) %>%
+      addCircleMarkers(
+        lng = site_row$Longitude, lat = site_row$Latitude,
+        radius = 8, color = "#A26BCDFF", weight = 2, fillOpacity = 0.9,
+        popup = site_row$Site_full_name
+      )
+  })
+
+  # The four organic micropollutants with the greatest concentration range
+  # (max - min, treating non-detects as 0) at the selected site over the
+  # monitoring period, used to auto-pick the time series panels below.
+  selected_site_top_chemicals <- reactive({
+    selected_site_long() %>%
+      dplyr::filter(parameter_group == "Organic micropollutant") %>%
+      dplyr::group_by(parameter, parameter_label) %>%
+      dplyr::summarise(
+        range_val = {
+          rng <- suppressWarnings(range(value_num, na.rm = TRUE))
+          if (all(is.finite(rng))) diff(rng) else NA_real_
+        },
+        .groups = "drop"
+      ) %>%
+      dplyr::filter(is.finite(range_val)) %>%
+      dplyr::arrange(dplyr::desc(range_val)) %>%
+      dplyr::slice_head(n = 4)
+  })
+
+  # Chemical x week occurrence grid data for the selected site. Colour is a
   # log-scaled concentration relative to that parameter's own maximum at this
   # site (0-1), so a single high-concentration compound doesn't wash out the
   # colour scale for every other row. Non-detects sit at the bottom of the
   # scale (true zero); missing samples are shown as a distinct flat grey via
   # NA rather than being folded into the continuous scale.
-  output$site_chem_grid <- renderPlot({
+  # Pulled out of the plot renderer so the hover tooltip below (via
+  # nearPoints()) reads the exact same rows/factor levels as the plot.
+  site_chem_grid_data <- reactive({
     df_grid <- selected_site_long() %>%
       dplyr::group_by(parameter) %>%
       dplyr::mutate(
@@ -958,6 +1098,11 @@ server <- function(input, output, session) {
       dplyr::arrange(parameter_group, parameter_label) %>%
       dplyr::pull(parameter_label)
     df_grid$parameter_label <- factor(df_grid$parameter_label, levels = rev(parameter_order))
+    df_grid
+  })
+
+  output$site_chem_grid <- renderPlot({
+    df_grid <- site_chem_grid_data()
 
     ggplot(df_grid, aes(x = Date, y = parameter_label, fill = color_value)) +
       geom_tile(color = "white", linewidth = 0.15) +
@@ -966,35 +1111,92 @@ server <- function(input, output, session) {
         na.value = "grey85",
         limits = c(0, 1)
       ) +
-      scale_x_date(expand = c(0, 0)) +
+      scale_x_date(expand = c(0, 0), date_labels = "%b %Y") +
       labs(
         x = "Sampling week", y = NULL,
         caption = "Colour = log-scaled concentration relative to this site's own maximum for that parameter. Grey = no sample taken that week."
       ) +
-      theme_bw(base_size = 11) +
+      theme_bw(base_size = 12) +
       theme(
-        axis.text.y = element_text(size = 8),
+        axis.text.y = element_text(size = 9),
+        axis.text.x = element_text(size = 9, angle = 45, hjust = 1),
         panel.grid = element_blank()
       )
   })
 
-  # Time series for the parameter chosen in the dropdown
+  # Hover tooltip for the occurrence grid. nearPoints() maps the mouse
+  # position back onto the same Date x / parameter_label y domain the plot
+  # above was drawn with (both discrete factors and Date axes are supported),
+  # so this stays correct even though each tile has no visible text of its own.
+  output$site_chem_grid_tooltip <- renderUI({
+    hover <- input$site_chem_grid_hover
+    req(hover)
+
+    point <- nearPoints(site_chem_grid_data(), hover,
+                         xvar = "Date", yvar = "parameter_label",
+                         threshold = 15, maxpoints = 1)
+    if (nrow(point) == 0) return(NULL)
+
+    detail_text <- switch(point$status[1],
+      "Detected" = paste0("Value: ", round(point$value_num[1], 3)),
+      "Non-detect" = "Not detected (below LOD)",
+      "No sample" = "No sample taken"
+    )
+
+    style <- paste0(
+      "position:absolute; z-index:1000; pointer-events:none; ",
+      "left:", hover$coords_css$x + 12, "px; top:", hover$coords_css$y + 12, "px; ",
+      "background-color: rgba(255,255,255,0.97); border:1px solid #999; ",
+      "border-radius:4px; padding:6px 10px; font-size:12px; ",
+      "box-shadow: 1px 1px 4px rgba(0,0,0,0.25); white-space: nowrap;"
+    )
+
+    div(
+      style = style,
+      tags$strong(point$parameter_label[1]), tags$br(),
+      format(point$Date[1], "%d %b %Y"), tags$br(),
+      detail_text
+    )
+  })
+
+  # Stacked time series for the four chemicals/parameters chosen in the Panel
+  # 1-4 selectors above (defaulted to the greatest-range chemicals by the
+  # rv_site() observer above, but freely overridable by the user).
+  # "No sample" rows have no value_num to plot as a point (there's nothing
+  # detected or not-detected that week) - they only ever show up as a gap in
+  # the line, so they're deliberately left out of the point colour scale
+  # rather than added as a legend entry that could never actually render.
   output$site_time_series <- renderPlot({
-    req(input$site_detail_chemical)
-    df_ts <- selected_site_long() %>%
-      dplyr::filter(parameter == input$site_detail_chemical)
+    params <- vapply(seq_len(4), function(i) input[[paste0("site_ts_chemical_", i)]] %||% "", character(1))
+    req(all(nzchar(params)))
+
+    # Tag each panel with its own selector index so choosing the same
+    # chemical in two panels still produces four distinct stacked plots,
+    # each in the order its selector appears in (top to bottom).
+    df_ts <- dplyr::bind_rows(lapply(seq_along(params), function(i) {
+      selected_site_long() %>%
+        dplyr::filter(parameter == params[i]) %>%
+        dplyr::mutate(panel_label = paste0("Panel ", i, ": ", monitoring_parameter_label(params[i])))
+    }))
+    panel_levels <- paste0("Panel ", seq_along(params), ": ", monitoring_parameter_label(params))
+    df_ts$panel_label <- factor(df_ts$panel_label, levels = panel_levels)
 
     ggplot(df_ts, aes(x = Date, y = value_num)) +
       geom_line(color = "#2171B5", na.rm = TRUE) +
-      geom_point(aes(color = status), size = 2) +
+      geom_point(aes(color = status), size = 1.6, na.rm = TRUE) +
       scale_color_manual(
         name = "Status",
-        breaks = c("Detected", "Non-detect", "No sample"),
-        values = c("Detected" = "#2171B5", "Non-detect" = "#5B84B1FF", "No sample" = "grey60")
+        breaks = c("Detected", "Non-detect"),
+        values = c("Detected" = "#2171B5", "Non-detect" = "#5B84B1FF")
       ) +
-      labs(x = "Date", y = unique(df_ts$parameter_label)[1]) +
+      scale_x_date(expand = expansion(mult = c(0.02, 0.06))) +
+      facet_wrap(vars(panel_label), ncol = 1, scales = "free_y") +
+      labs(
+        x = "Date", y = NULL,
+        caption = "Gaps indicate no sample taken."
+      ) +
       theme_bw() +
-      theme(legend.position = "bottom", legend.title = element_blank())
+      theme(legend.position = "bottom", legend.title = element_blank(), strip.text = element_text(face = "bold"))
   })
 
 
