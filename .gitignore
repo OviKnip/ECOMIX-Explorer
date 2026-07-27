@@ -4,3 +4,11 @@ data/DB_Proj_Month/.DS_Store
 data/DB_Proj_Month/subbasin=10054/.DS_Store
 data/monitoring/comix_monitoring_data_Dashboard.csv
 /.vscode
+
+# Staging output of scripts/consolidate_proj_data.R and pre-swap backups of
+# the old Hive-partitioned data/ folders (see the data-consolidation plan) -
+# neither should be committed.
+/data_consolidated/
+data/*_hive_backup/
+data-chem/1_DAILY_BY_SITE_conc_ng_L/1_DAILY_BY_SITE_conc_ng_L.parquet
+.DS_Store

@@ -1,50 +1,497 @@
+/* ECOMIX Explorer - Modernist theme
+   Flat, architectural, Archivo, zero radius, 2px rules, one accent.
+   Tokens mirror the Modernist design system. */
 
-input[type="number"] {
-  max-width: 80%;
+:root {
+  --ec-ground:      #f3f2f2;
+  --ec-surface:     #eae9e9;
+  --ec-ink:         #201e1d;
+  --ec-ink-muted:   #444141;
+  --ec-ink-dim:     #605d5d;
+  --ec-rule:        #201e1d;
+  --ec-rule-light:  #d7d3d3;
+  --ec-accent:      #ec3013;
+  --ec-accent-text: #ae1800;
+  --ec-accent-tint: #ffe0d9;
+  --ec-accent-ink:  #7c1405;
+
+  --ec-bar-h:       56px;
+  --ec-ctx-h:       96px;
 }
 
-div.outer {
-  position: fixed;
-  top: 41px;
-  left: 0;
-  right: 0;
-  bottom: 0;
+/* ---------- base ---------- */
+
+body,
+.bslib-page-navbar {
+  background: var(--ec-ground);
+  color: var(--ec-ink);
+  font-family: "Archivo", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+* { border-radius: 0 !important; }
+
+a { color: var(--ec-accent-text); text-decoration: none; }
+a:hover { color: var(--ec-accent); }
+
+:focus-visible {
+  outline: 2px solid var(--ec-accent);
+  outline-offset: 2px;
+}
+
+::selection { background: var(--ec-accent-tint); }
+
+/* ---------- navbar ---------- */
+
+.navbar {
+  background: var(--ec-ground) !important;
+  border-bottom: 2px solid var(--ec-rule);
+  min-height: var(--ec-bar-h);
+  padding: 0 24px;
+  box-shadow: none;
+}
+
+.navbar .navbar-brand {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ec-ink) !important;
+  padding-right: 24px;
+}
+
+.navbar .nav-link {
+  color: var(--ec-ink-dim) !important;
+  padding: 0 16px !important;
+  height: var(--ec-bar-h);
+  display: flex;
+  align-items: center;
+}
+
+.navbar .nav-link:hover { color: var(--ec-ink) !important; }
+
+.navbar .nav-link.active {
+  color: var(--ec-ink) !important;
+  font-weight: 600;
+  box-shadow: inset 0 -4px 0 0 var(--ec-accent);
+}
+
+/* ---------- context strip ---------- */
+
+.ctx {
+  display: flex;
+  align-items: stretch;
+  height: var(--ec-ctx-h);
+  min-height: var(--ec-ctx-h);
+  background: var(--ec-surface);
+  border-bottom: 2px solid var(--ec-rule);
+  flex: 0 0 auto;
+}
+
+.ctx-map {
+  width: 140px;
+  flex: 0 0 140px;
+  border-right: 2px solid var(--ec-rule);
   overflow: hidden;
-  padding: 0;
 }
 
-/* Customize fonts */
-body, label, input, button, select { 
-  font-family: 'Helvetica Neue', Helvetica;
-  font-weight: 200;
-}
-h1, h2, h3, h4 { font-weight: 400; }
-
-#controls {
-  /* Appearance */
-  background-color: white;
-  padding: 0 20px 20px 20px;
-  cursor: move;
-  /* Fade out while not hovering */
-  opacity: 0.65;
-  zoom: 0.9;
-  transition: opacity 500ms 1s;
-}
-#controls:hover {
-  /* Fade in while hovering */
-  opacity: 0.95;
-  transition-delay: 0;
+.ctx-id {
+  width: 280px;
+  flex: 0 0 280px;
+  border-right: 2px solid var(--ec-rule);
+  padding: 12px 16px;
+  overflow: hidden;
 }
 
-/* Position and style citation */
-#cite {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
+.ctx-id-value {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.ctx-id-sub {
+  color: var(--ec-ink-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-stats {
+  flex: 1 1 auto;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  min-width: 0;
+}
+
+.ctx-stat {
+  padding: 12px 16px;
+  border-right: 2px solid var(--ec-rule-light);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ctx-stat:last-child { border-right: 0; }
+
+.ctx-label {
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ec-ink-dim);
+  margin-bottom: 4px;
+}
+
+.ctx-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.ctx-value .unit {
   font-size: 12px;
+  font-weight: 400;
+  color: var(--ec-ink-dim);
 }
 
-/* If not using map tiles, show a white background */
-.leaflet-container {
-  background-color: white !important;
+.ctx-act {
+  width: 180px;
+  flex: 0 0 180px;
+  border-left: 2px solid var(--ec-rule);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-weight: 600;
 }
+
+/* ---------- sidebar (the one control rail) ---------- */
+
+.bslib-sidebar-layout > .sidebar {
+  background: var(--ec-ground) !important;
+  border-right: 2px solid var(--ec-rule) !important;
+}
+
+.bslib-sidebar-layout > .sidebar > .sidebar-content {
+  padding: 16px;
+  gap: 16px;
+}
+
+.bslib-sidebar-layout > .sidebar .sidebar-title {
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ec-ink-dim);
+  font-weight: 400;
+  border-bottom: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.bslib-sidebar-layout > .collapse-toggle { color: var(--ec-ink-dim); }
+
+/* form controls */
+
+.control-label,
+.shiny-input-container > label {
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ec-ink-dim);
+  font-weight: 400;
+  margin-bottom: 6px;
+}
+
+.form-control,
+.form-select,
+.selectize-input {
+  border: 2px solid var(--ec-rule);
+  background: var(--ec-ground);
+  color: var(--ec-ink);
+  font-size: 13px;
+  box-shadow: none !important;
+}
+
+.form-control:focus,
+.form-select:focus,
+.selectize-input.focus {
+  border-color: var(--ec-accent);
+  outline: 2px solid var(--ec-accent);
+  outline-offset: 1px;
+}
+
+.selectize-input > .item {
+  background: var(--ec-accent-tint) !important;
+  color: var(--ec-accent-ink) !important;
+  border: 0 !important;
+  font-weight: 600;
+  padding: 1px 8px !important;
+}
+
+.selectize-dropdown { border: 2px solid var(--ec-rule); }
+.selectize-dropdown .active { background: var(--ec-accent-tint); color: var(--ec-accent-ink); }
+
+.help-block, .shiny-input-container .help-block, small.text-muted {
+  color: var(--ec-ink-dim) !important;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* buttons */
+
+.btn,
+.btn-default,
+.shiny-download-link {
+  border: 2px solid var(--ec-rule);
+  background: var(--ec-ground);
+  color: var(--ec-ink);
+  font-weight: 600;
+  font-size: 13px;
+  text-align: left;
+  padding: 8px 14px;
+  box-shadow: none;
+}
+
+.btn:hover { background: var(--ec-accent-tint); border-color: var(--ec-accent); color: var(--ec-accent-ink); }
+.btn:active { background: var(--ec-accent); border-color: var(--ec-accent); color: #fff; }
+
+.btn-accent,
+.shiny-download-link {
+  background: var(--ec-accent);
+  border-color: var(--ec-accent);
+  color: #fff;
+}
+
+.btn-accent:hover,
+.shiny-download-link:hover {
+  background: var(--ec-accent-text);
+  border-color: var(--ec-accent-text);
+  color: #fff;
+}
+
+/* ---------- cards / panels ---------- */
+
+.card,
+.bslib-card {
+  background: var(--ec-ground);
+  border: 0;
+  border-right: 2px solid var(--ec-rule);
+  border-bottom: 2px solid var(--ec-rule);
+  box-shadow: none;
+}
+
+.card > .card-header,
+.bslib-card > .card-header {
+  background: var(--ec-ground);
+  border-bottom: 2px solid var(--ec-rule-light);
+  color: var(--ec-ink);
+  font-size: 15px;
+  font-weight: 800;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card > .card-body,
+.bslib-card > .card-body {
+  padding: 12px 16px 8px;
+}
+
+/* nav pills inside a card header -> segmented control */
+
+.card > .card-header .nav-pills {
+  gap: 0;
+  border: 2px solid var(--ec-rule);
+}
+
+.card > .card-header .nav-pills .nav-link {
+  color: var(--ec-ink-dim);
+  padding: 4px 14px;
+  font-size: 13px;
+  border-left: 2px solid var(--ec-rule);
+}
+
+.card > .card-header .nav-pills .nav-item:first-child .nav-link { border-left: 0; }
+
+.card > .card-header .nav-pills .nav-link.active {
+  background: var(--ec-ink);
+  color: var(--ec-ground);
+  font-weight: 600;
+}
+
+/* inline "pill" control triggers in card headers */
+
+.pill {
+  border: 2px solid var(--ec-rule-light);
+  padding: 2px 8px;
+  color: var(--ec-ink);
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.pill:hover { border-color: var(--ec-accent); color: var(--ec-accent-text); }
+
+.panel-note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ec-ink-dim);
+  font-weight: 400;
+}
+
+/* ---------- list rails (catchments, sites) ---------- */
+
+.rail-list { overflow-y: auto; }
+
+.rail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 16px;
+  border-bottom: 2px solid var(--ec-rule-light);
+  color: var(--ec-ink);
+  cursor: pointer;
+}
+
+.rail-row:hover { background: var(--ec-surface); color: var(--ec-ink); }
+
+.rail-row.is-active {
+  background: var(--ec-accent-tint);
+  color: var(--ec-accent-ink);
+  font-weight: 600;
+}
+
+.rail-row .rail-num { color: var(--ec-ink-dim); font-variant-numeric: tabular-nums; }
+.rail-row.is-active .rail-num { color: var(--ec-accent-ink); }
+
+.rail-row-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.rail-swatch {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(32, 30, 29, 0.25);
+}
+
+.rail-head {
+  padding: 8px 16px;
+  border-bottom: 2px solid var(--ec-rule);
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ec-ink-dim);
+}
+
+/* ---------- ranked bar list (Spatial) ---------- */
+
+.bar-item { margin-bottom: 9px; }
+.bar-item .bar-top { display: flex; justify-content: space-between; gap: 8px; }
+.bar-item .bar-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+.bar-track { height: 8px; background: var(--ec-rule-light); margin-top: 3px; }
+.bar-fill { height: 8px; background: var(--ec-ink); }
+.bar-item.is-active .bar-val { color: var(--ec-accent-text); }
+.bar-item.is-active .bar-fill { background: var(--ec-accent); }
+
+/* ---------- tables ---------- */
+
+table.dataTable {
+  border-collapse: collapse !important;
+  font-size: 13px;
+}
+
+table.dataTable thead th {
+  background: var(--ec-ground);
+  border-bottom: 2px solid var(--ec-rule) !important;
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ec-ink-dim);
+  font-weight: 400;
+}
+
+table.dataTable tbody td {
+  border-bottom: 2px solid var(--ec-rule-light) !important;
+  padding: 9px 12px;
+}
+
+table.dataTable tbody tr.selected td,
+table.dataTable tbody tr:hover td { background: var(--ec-accent-tint) !important; }
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+  border: 2px solid var(--ec-rule-light) !important;
+  color: var(--ec-ink-dim) !important;
+  background: var(--ec-ground) !important;
+  margin-left: 6px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+  background: var(--ec-ink) !important;
+  color: var(--ec-ground) !important;
+  border-color: var(--ec-ink) !important;
+}
+
+.dataTables_wrapper .dataTables_filter input { border: 2px solid var(--ec-rule); }
+
+/* ---------- leaflet ---------- */
+
+.leaflet-container { background: var(--ec-surface); }
+
+.leaflet-bar,
+.leaflet-control-layers,
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  border: 2px solid var(--ec-rule) !important;
+  box-shadow: none !important;
+  background: var(--ec-ground);
+}
+
+.leaflet-control-layers label { font-size: 12px; }
+
+.info.legend {
+  background: var(--ec-ground) !important;
+  border: 2px solid var(--ec-rule) !important;
+  box-shadow: none !important;
+  font-size: 11px;
+  padding: 10px 12px !important;
+}
+
+.map-note {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  right: 16px;
+  z-index: 500;
+  font-size: 11px;
+  color: var(--ec-ink-muted);
+  max-width: 640px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.map-wrap { position: relative; height: 100%; }
+
+/* ---------- misc ---------- */
+
+.ctx-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--ec-accent-tint);
+  color: var(--ec-accent-ink);
+  font-size: 11px;
+  margin: 2px 6px 0 0;
+}
+
+.section-label {
+  font-size: 10px;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--ec-ink-dim);
+  margin-bottom: 8px;
+}
+
+.shiny-text-output { display: inline; }
+
+hr, .hr { border-top: 2px solid var(--ec-rule); opacity: 1; }

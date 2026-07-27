@@ -1,8 +1,6 @@
 # ECOMIX-Explorer
 Interactive dashboard for ECOMIX data.
 
-The repository now includes a Streamlit implementation in [streamlit_app.py](streamlit_app.py), alongside the original R Shiny code in [app.R](app.R).
-
 This is the web dashboard code for the [ECOMIX](https://water.leeds.ac.uk/fwq-programme/assessing-and-managing-the-impacts-of-mixtures-of-chemicals-on-uk-freshwater-biodiversity/) project, that is part of the [NERC Freshwater Quality Programme](https://water.leeds.ac.uk/event_category/freshwater-quality-programme/).
 
 This project will develop a novel assessment framework for assessing the real impacts of chemical pollution in UK rivers. It will identify and manage hotspots of risk, helping to halt the decline in freshwater biodiversity.
