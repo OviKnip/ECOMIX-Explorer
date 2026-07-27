@@ -19,34 +19,3 @@ This project will:
 
 The modelling tools developed during this project will inform the development of better plans for adaptation and mitigation of risks associated with declining water quality now and in the future. Led by Professor Alistair Boxall, University of York, with partners University of Sheffield and Durham University. 
 
-## Streamlit app
-
-The Streamlit port reproduces the main Shiny workflows:
-
-* subbasin selection on an interactive map
-* climate, observations, yearly, monthly, and distribution plots
-* spatial dataset mapping
-* tabular and spatial downloads
-* embedded Julia Dash panel for Food Web Dynamics
-
-### Run locally
-
-Install the Python dependencies:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Start the Streamlit app:
-
-```bash
-streamlit run streamlit_app.py
-```
-
-The Food Web Dynamics tab embeds the Julia Dash app at `http://127.0.0.1:8050`, so that service must be running separately if you want the iframe panel to load successfully.
-
-### Original Shiny app
-
-The original R Shiny version remains available in [app.R](app.R).
