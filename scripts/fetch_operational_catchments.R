@@ -7,7 +7,7 @@
 # subbasins_wgs are updated, or to refresh from a newer WFS cycle.
 #
 # Outputs (consumed by app.R):
-#   data/operational_catchments_wgs.shp    - operational catchments overlapping the study area
+#   gis-data/operational_catchments_wgs.shp - operational catchments overlapping the study area
 #   data/subbasin_operational_catchment.csv - subbasin Id -> associated opcat_id / opcat_name
 
 library(sf)
@@ -21,7 +21,7 @@ WFS_URL <- paste0(
   "&outputFormat=application/json&count=5000"
 )
 
-catchments <- read_sf(here("data", "catchments_wgs.shp"))
+catchments <- read_sf(here("gis-data", "catchments_wgs.shp"))
 catchment_union <- st_union(catchments)
 
 # Query the WFS with a bounding-box filter (lat/lon order for EPSG:4326)
@@ -42,12 +42,12 @@ overlaps <- lengths(st_intersects(opcat_raw, catchment_union)) > 0
 opcat <- opcat_raw[overlaps, ] %>%
   select(opcat_id, opcat_name, mncat_name, rbd_name)
 
-st_write(opcat, here("data", "operational_catchments_wgs.shp"), delete_layer = TRUE)
-cat(sprintf("Wrote %d operational catchments to data/operational_catchments_wgs.shp\n", nrow(opcat)))
+st_write(opcat, here("gis-data", "operational_catchments_wgs.shp"), delete_layer = TRUE)
+cat(sprintf("Wrote %d operational catchments to gis-data/operational_catchments_wgs.shp\n", nrow(opcat)))
 
 # ---- Associate each subbasin with the operational catchment it overlaps the most ----
 
-subbasins <- read_sf(here("data", "subbasins_wgs.shp")) %>%
+subbasins <- read_sf(here("gis-data", "subbasins_wgs.shp")) %>%
   st_make_valid()
 
 opcat_for_join <- opcat %>% mutate(.opcat_row = row_number())
