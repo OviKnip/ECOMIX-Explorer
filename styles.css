@@ -385,6 +385,31 @@ a:hover { color: var(--ec-accent); }
   color: var(--ec-ink-dim);
 }
 
+/* ---------- measured/modelled + subbasin/water body segmented toggle ---------- */
+/* Same segmented-control look as ".card > .card-header .nav-pills" (used by
+   projection_tabs), duplicated here rather than broadening that selector,
+   since this toggle lives in a sidebar rather than a card header. */
+
+.rail-toggle { margin-bottom: 8px; }
+.rail-toggle .nav-pills { display: flex; gap: 0; border: 2px solid var(--ec-rule); }
+.rail-toggle .nav-pills .nav-item { flex: 1 1 0; }
+.rail-toggle .nav-pills .nav-link {
+  display: block;
+  text-align: center;
+  color: var(--ec-ink-dim);
+  padding: 4px 14px;
+  font-size: 13px;
+  border-left: 2px solid var(--ec-rule);
+}
+.rail-toggle .nav-pills .nav-item:first-child .nav-link { border-left: 0; }
+.rail-toggle .nav-pills .nav-link.active {
+  background: var(--ec-ink);
+  color: var(--ec-ground);
+  font-weight: 600;
+}
+.rail-toggle .tab-content { padding: 0; border: 0; }
+.rail-toggle .tab-content > .tab-pane .rail-list { margin-top: 8px; }
+
 /* ---------- ranked bar list (Spatial) ---------- */
 
 .bar-item { margin-bottom: 9px; }

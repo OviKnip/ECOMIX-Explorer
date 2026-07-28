@@ -2,37 +2,39 @@
 
   <h2>Using the ECOMIX Explorer</h2>
   <p>
-    This dashboard lets you explore catchment data, monitoring records and
-    model projections for the ECOMIX study area. Use the tabs at the top of
-    the page to move between the different tools described below.
+    This dashboard lets you explore catchment data, real measured records,
+    modelled water body concentrations, and model projections for the
+    ECOMIX study area. Use the tabs at the top of the page to move between
+    the different tools described below.
   </p>
 
   <h3>Map</h3>
   <p>
     Click a subbasin on the map to select it. Details for the selected
     subbasin appear in the panel on the right, which can be dragged to a
-    different position on the screen if it is in your way.
-  </p>
-
-  <h3>Monitoring</h3>
-  <p>
-    Shows the location of all chemical-monitoring sites. Click a marker to
-    open that site's detailed record on the <strong>Site Details</strong> tab.
+    different position on the screen if it is in your way. The Map also has
+    toggleable layers for measured chemical-monitoring sites and modelled
+    water bodies - click a marker or water body polygon's popup link to open
+    its detailed record on the <strong>Site Details</strong> tab.
   </p>
 
   <h3>Site Details</h3>
   <p>
-    Displays a chemical occurrence grid and a time series plot for the
-    selected monitoring site. Use the sidebar dropdown to choose which
-    chemical parameter is shown in the time series.
+    Displays a chemical occurrence/concentration grid and a time series plot
+    for a selected measured site or modelled water body. Use the "Measured" /
+    "Modelled" toggle at the top of the sidebar list to switch between the
+    two, and the sidebar dropdown to choose which chemical parameter is
+    shown in the time series.
   </p>
 
-  <h3>Chemicals in the monitoring dataset</h3>
+  <h3>Chemicals in the measured and modelled datasets</h3>
   <p>
-    The monitoring sites test for 48 organic micropollutants, 2 metals and
-    5 physicochemical parameters. Brief notes on what each substance is,
-    where it typically comes from, and its likely ecological impact are
-    given below, grouped by chemical type.
+    The measured sites test for 48 organic micropollutants, 2 metals and
+    5 physicochemical parameters; the modelled water bodies cover the same
+    26 organic micropollutants/metals as monthly modelled concentrations.
+    Brief notes on what each substance is, where it typically comes from,
+    and its likely ecological impact are given below, grouped by chemical
+    type.
   </p>
 
   <table style="width: 100%; border-collapse: collapse; font-size: 0.92em; margin-bottom: 24px;">
@@ -169,13 +171,19 @@
     The summary boxes at the top show key information about the selection,
     and the plots below can be expanded to full screen using the icon in
     the top-right corner of each card. The projections card has separate
-    tabs for yearly, monthly and cumulative-frequency views.
+    tabs for yearly, monthly and cumulative-frequency views. Use the
+    "Subbasin" / "Water body" toggle at the top of the sidebar to switch to
+    a modelled water body's chemical concentration series instead - climate
+    and observed hydrology have no water-body equivalent, so those cards are
+    unavailable in that mode.
   </p>
 
   <h3>Spatial Datasets</h3>
   <p>
     Choose a model output variable from the sidebar to view it mapped
-    across the catchment.
+    across the catchment - including, for chemical variables, either the
+    subbasin-level daily dataset or the water body-level modelled monthly
+    dataset.
   </p>
 
   <h3>Data Downloader</h3>

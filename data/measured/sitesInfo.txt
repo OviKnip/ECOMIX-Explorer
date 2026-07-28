@@ -6,7 +6,7 @@
 # must be replaced with verified catchment data before this dashboard is used
 # for any real analysis or reporting.
 #
-# Format: one block per monitoring site, starting with "### <Site_id>" where
+# Format: one block per measured site, starting with "### <Site_id>" where
 # <Site_id> matches the Site_id column in comix_monitoring_data_Dashboard.csv.
 # Each block has "Key: Value" lines. "Land cover - X (%)" lines should sum to
 # ~100 for a given site.

@@ -2,7 +2,7 @@
 data/.DS_Store
 data/DB_Proj_Month/.DS_Store
 data/DB_Proj_Month/subbasin=10054/.DS_Store
-data/monitoring/comix_monitoring_data_Dashboard.csv
+data/measured/comix_monitoring_data_Dashboard.csv
 /.vscode
 
 # Staging output of scripts/consolidate_proj_data.R and pre-swap backups of

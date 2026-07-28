@@ -115,7 +115,7 @@ no_data_plot <- function(msg) {
     ggplot2::theme(plot.background = ggplot2::element_rect(fill = ec$ground, colour = NA))
 }
 
-# Basemap tile choice shared by every full-size leaflet map (Map, Monitoring,
+# Basemap tile choice shared by every full-size leaflet map (Map,
 # Spatial Datasets). Works on both a fresh `leaflet()` widget and a
 # `leafletProxy()`, since both dispatch through the same addTiles/
 # addProviderTiles S3 methods - callers just pair it with `clearGroup
@@ -241,52 +241,52 @@ df_stats_lc$subbasin <- as.numeric(gsub("X", "", df_stats_lc$subbasin))
 df_temp <- read.csv(here("data/Dummy_Data_TT2.csv"))
 df_temp$date <- as.Date(df_temp$date)
 
-# ---- Chemical / physicochemical monitoring dataset ----
+# ---- Chemical / physicochemical measured dataset ----
 #
-# Raw monitoring data is read as all-character columns so that "ND"
+# Raw measured data is read as all-character columns so that "ND"
 # (non-detect) values sit alongside numeric concentrations without read.csv
 # silently coercing an entire analyte column to NA.
-df_monitoring_raw <- read.csv(
-  here("data/monitoring/comix_monitoring_data_Dashboard.csv"),
+df_measured_raw <- read.csv(
+  here("data/measured/comix_monitoring_data_Dashboard.csv"),
   colClasses = "character",
   check.names = FALSE
 )
-colnames(df_monitoring_raw)[1] <- "Site_id" # first header cell carries a stray BOM
+colnames(df_measured_raw)[1] <- "Site_id" # first header cell carries a stray BOM
 
 # The file's final row is a footnote about the ND/NA convention, not a real
-# monitoring record - drop any row without a parseable latitude.
-df_monitoring_raw <- df_monitoring_raw[
-  !is.na(suppressWarnings(as.numeric(df_monitoring_raw$Latitude))),
+# measured record - drop any row without a parseable latitude.
+df_measured_raw <- df_measured_raw[
+  !is.na(suppressWarnings(as.numeric(df_measured_raw$Latitude))),
 ]
 
-monitoring_meta_cols <- c("Site_id", "Site_full_name", "Latitude", "Longitude", "Week_Month", "Date")
-monitoring_physchem_cols <- tail(setdiff(names(df_monitoring_raw), monitoring_meta_cols), 7)
-monitoring_chemical_cols <- setdiff(names(df_monitoring_raw), c(monitoring_meta_cols, monitoring_physchem_cols))
+measured_meta_cols <- c("Site_id", "Site_full_name", "Latitude", "Longitude", "Week_Month", "Date")
+measured_physchem_cols <- tail(setdiff(names(df_measured_raw), measured_meta_cols), 7)
+measured_chemical_cols <- setdiff(names(df_measured_raw), c(measured_meta_cols, measured_physchem_cols))
 
-df_monitoring_raw$Date <- as.Date(df_monitoring_raw$Date, format = "%d/%m/%Y")
-df_monitoring_raw$Latitude <- as.numeric(df_monitoring_raw$Latitude)
-df_monitoring_raw$Longitude <- as.numeric(df_monitoring_raw$Longitude)
+df_measured_raw$Date <- as.Date(df_measured_raw$Date, format = "%d/%m/%Y")
+df_measured_raw$Latitude <- as.numeric(df_measured_raw$Latitude)
+df_measured_raw$Longitude <- as.numeric(df_measured_raw$Longitude)
 
 # Strip the stray unit suffix baked into the "6PPD-Q" column name for display only.
-monitoring_parameter_label <- function(x) sub("_ng L⁻¹$", "", x)
+measured_parameter_label <- function(x) sub("_ng L⁻¹$", "", x)
 
-# One row per site, for the monitoring map.
-df_monitoring_sites <- df_monitoring_raw %>%
+# One row per site, for the measured sites map.
+df_measured_sites <- df_measured_raw %>%
   dplyr::select(Site_id, Site_full_name, Latitude, Longitude) %>%
   dplyr::distinct(Site_id, .keep_all = TRUE)
 
 # Tidy long format: one row per site/date/parameter, with a detection status
 # derived from the raw string ("ND" -> non-detect, blank -> no sample taken).
-df_monitoring_long <- df_monitoring_raw %>%
+df_measured_long <- df_measured_raw %>%
   tidyr::pivot_longer(
-    cols = dplyr::all_of(c(monitoring_chemical_cols, monitoring_physchem_cols)),
+    cols = dplyr::all_of(c(measured_chemical_cols, measured_physchem_cols)),
     names_to = "parameter",
     values_to = "value_raw"
   ) %>%
   dplyr::mutate(
-    parameter_group = ifelse(parameter %in% monitoring_physchem_cols,
+    parameter_group = ifelse(parameter %in% measured_physchem_cols,
                               "Physicochemical parameter", "Organic micropollutant"),
-    parameter_label = monitoring_parameter_label(parameter),
+    parameter_label = measured_parameter_label(parameter),
     status = dplyr::case_when(
       is.na(value_raw) | value_raw == "" ~ "No sample",
       value_raw == "ND" ~ "Non-detect",
@@ -301,9 +301,10 @@ df_monitoring_long <- df_monitoring_raw %>%
   dplyr::select(Site_id, Site_full_name, Latitude, Longitude, Date,
                 parameter, parameter_label, parameter_group, status, value_num)
 
-# Per-site summary powering the Monitoring page's site table and its context
-# strip: how often anything was detected, and the largest concentration seen.
-df_monitoring_site_summary <- df_monitoring_long %>%
+# Per-site summary powering the Site Details page's site table and its
+# context strip: how often anything was detected, and the largest
+# concentration seen.
+df_measured_site_summary <- df_measured_long %>%
   dplyr::filter(parameter_group == "Organic micropollutant") %>%
   dplyr::group_by(Site_id, Site_full_name) %>%
   dplyr::summarise(
@@ -318,22 +319,27 @@ df_monitoring_site_summary <- df_monitoring_long %>%
   dplyr::arrange(dplyr::desc(detection_rate))
 
 # Grouped choices for the Site Details time series chemical/parameter
-# selectors below.
-monitoring_parameter_choices <- list(
-  "Organic micropollutants" = setNames(monitoring_chemical_cols, monitoring_parameter_label(monitoring_chemical_cols)),
-  "Physicochemical parameters" = setNames(monitoring_physchem_cols, monitoring_physchem_cols)
+# selectors below (measured mode).
+measured_parameter_choices <- list(
+  "Organic micropollutants" = setNames(measured_chemical_cols, measured_parameter_label(measured_chemical_cols)),
+  "Physicochemical parameters" = setNames(measured_physchem_cols, measured_physchem_cols)
 )
 
-# Site background information (dummy placeholder data - see file header of
-# sitesInfo.txt). Parsed once at startup into a named list keyed by Site_id.
-parse_site_info <- function(path) {
+# Short background information for a measured site or modelled water body
+# (dummy placeholder data - see the file header of sitesInfo.txt /
+# waterbodyInfo.txt). Parsed once at startup into a named list keyed by
+# Site_id or water_body id. The name field accepts either "Site" (measured
+# blocks) or "Water body" (modelled blocks); "Operational catchment" and
+# landcover/population are optional and simply come back NA/empty when a
+# block doesn't have them (true for every modelled block).
+parse_entity_info <- function(path) {
   lines <- readLines(path, encoding = "UTF-8")
   lines <- lines[!(grepl("^\\s*#", lines) & !grepl("^### ", lines))] # drop comment lines, keep block headers
   block_starts <- grep("^### ", lines)
 
-  site_info <- list()
+  entity_info <- list()
   for (i in seq_along(block_starts)) {
-    site_id <- sub("^### ", "", lines[block_starts[i]])
+    entity_id <- sub("^### ", "", lines[block_starts[i]])
     start <- block_starts[i] + 1
     end <- if (i < length(block_starts)) block_starts[i + 1] - 1 else length(lines)
     block_lines <- lines[start:end]
@@ -349,17 +355,29 @@ parse_site_info <- function(path) {
     landcover_idx <- grepl("^Land cover", names(values))
     landcover_names <- gsub("^Land cover - | \\(%\\)$", "", names(values)[landcover_idx])
 
-    site_info[[site_id]] <- list(
-      site_name = unname(values["Site"]),
+    name <- unname(values["Site"])
+    if (is.na(name)) name <- unname(values["Water body"])
+
+    entity_info[[entity_id]] <- list(
+      name = name,
       summary = unname(values["Summary"]),
       population = unname(values["Population (catchment)"]),
+      opcat = unname(values["Operational catchment"]),
       landcover = setNames(as.numeric(values[landcover_idx]), landcover_names)
     )
   }
-  site_info
+  entity_info
 }
 
-monitoring_site_info <- parse_site_info(here("data/monitoring/sitesInfo.txt"))
+measured_site_info <- parse_entity_info(here("data/measured/sitesInfo.txt"))
+modelled_site_info <- tryCatch(
+  parse_entity_info(here("data/modelled/waterbodyInfo.txt")),
+  error = function(e) {
+    warning("data/modelled/waterbodyInfo.txt not found - run scripts/build_waterbody_info.R first. ",
+            "Modelled water body summaries will be unavailable.")
+    list()
+  }
+)
 
 # Historical simulations at observation sites
 db_name <- here("data/DB_Historical_Sim_Obs")
@@ -455,9 +473,10 @@ spatial_percentile_choices <- c("Low extreme (P0.1)" = "0.1", "High extreme (P99
 chem_dir <- here("data-chem/1_DAILY_BY_SITE_conc_ng_L")
 chem_dataset <- arrow::open_dataset(file.path(chem_dir, "1_DAILY_BY_SITE_conc_ng_L.parquet"))
 
-# Display labels, aligned with the names already used on the Monitoring tab
-# where the same substance appears there (e.g. "6PPD-Q", "Benzo[a]pyrene",
-# "Erythromycin") so a chemical reads the same way across the app.
+# Display labels, aligned with the names already used on the measured Site
+# Details page where the same substance appears there (e.g. "6PPD-Q",
+# "Benzo[a]pyrene", "Erythromycin") so a chemical reads the same way across
+# the app.
 chem_display_lookup <- c(
   "6PPDQ" = "6PPD-Q", "Azoxystrobin" = "Azoxystrobin", "Cu" = "Cu",
   "Metformin" = "Metformin", "Zn" = "Zn", "anthracene" = "Anthracene",
@@ -554,6 +573,131 @@ get_chem_spatial_summary <- function(chem_key, stat_val) {
   }
   chem_spatial_cache[[key]]
 }
+
+# ---- Chemical concentration predictions (monthly, by water body) ----
+#
+# The "modelled" counterpart of the chem_* dataset above: instead of a daily
+# record resolved to a subbasin, this is a monthly (2018-2022) record
+# resolved to an EA water body (waterbody_id, matching the "water_body"
+# property already used by waterbody_shp/waterbody_opcat_shp). Built by
+# scripts/build_chem_parquet.py::build_monthly_parquet() from the same style
+# of per-chemical wide CSVs as the daily dataset. Kept as clearly-prefixed
+# siblings (wb_chem_*/wbchem_*) rather than folding into the chem_* names
+# above, since those already unambiguously mean "daily, by subbasin".
+wb_chem_dir <- here("data-chem/2_Modelling_results_by_waterbody_monthly_conc_ng_per_L")
+wb_chem_dataset <- arrow::open_dataset(
+  file.path(wb_chem_dir, "2_Modelling_results_by_waterbody_monthly_conc_ng_per_L.parquet")
+)
+
+# The modelled dataset's "chemical" values match chem_keys case-insensitively
+# (only "Cypermethrin"/"cypermethrin" and "metformin"/"Metformin" actually
+# differ in casing) - reconciled here from the data itself rather than a
+# hand-maintained lookup, with a fail-fast check in case the two vocabularies
+# ever diverge by more than a casing difference.
+wb_chem_raw_labels <- wb_chem_dataset %>%
+  # Casting to string before distinct()/collect() avoids an arrow
+  # "Unifying differing dictionaries" error - the dictionary-encoded
+  # "chemical" column has a different local dictionary per source CSV, and
+  # combining a distinct scan across all of them at their native dictionary
+  # type isn't supported, even though filtering/collecting matching rows
+  # from a single chemical (as every other wb_chem_* lookup below does) is.
+  dplyr::mutate(chemical = as.character(chemical)) %>%
+  dplyr::distinct(chemical) %>%
+  dplyr::collect() %>%
+  dplyr::pull(chemical)
+wb_chem_key_map <- setNames(chem_keys[match(tolower(wb_chem_raw_labels), tolower(chem_keys))], wb_chem_raw_labels)
+stopifnot(!anyNA(wb_chem_key_map))
+wb_chem_raw_label <- function(chem_key) names(wb_chem_key_map)[wb_chem_key_map == chem_key][1]
+
+# Water bodies with modelled data (336 of the 370 polygons in
+# EA_Waterbodies_AOI.geojson) - the other 34 are drawn on the map but greyed
+# out and not selectable anywhere else in the app.
+wb_chem_waterbody_ids <- wb_chem_dataset %>%
+  dplyr::distinct(waterbody_id) %>%
+  dplyr::collect() %>%
+  dplyr::pull(waterbody_id) %>%
+  sort()
+
+waterbody_opcat_shp <- waterbody_opcat_shp %>%
+  dplyr::mutate(has_model_data = water_body %in% wb_chem_waterbody_ids)
+
+# Per-waterbody, per-chemical monthly series - Site Details time series panel
+# and Data Explorer's water-body mode.
+wb_chem_series_cache <- new.env(parent = emptyenv())
+get_wb_chem_series <- function(chem_key, stat_val, wb_id) {
+  key <- paste(chem_key, stat_val, wb_id, sep = "||")
+  if (!exists(key, envir = wb_chem_series_cache, inherits = FALSE)) {
+    raw <- wb_chem_raw_label(chem_key)
+    df <- wb_chem_dataset %>%
+      dplyr::filter(chemical == raw, stat == stat_val, waterbody_id == wb_id) %>%
+      dplyr::select(date, value = conc_ng_L) %>%
+      dplyr::collect() %>%
+      dplyr::arrange(date)
+    df$year <- as.integer(format(df$date, "%Y"))
+    df$month <- as.integer(format(df$date, "%m"))
+    wb_chem_series_cache[[key]] <- df
+  }
+  wb_chem_series_cache[[key]]
+}
+
+# All 26 chemicals for one water body/statistic - Site Details occurrence
+# heatmap.
+wb_chem_grid_cache <- new.env(parent = emptyenv())
+get_wb_chem_grid <- function(wb_id, stat_val) {
+  key <- paste(wb_id, stat_val, sep = "||")
+  if (!exists(key, envir = wb_chem_grid_cache, inherits = FALSE)) {
+    wb_chem_grid_cache[[key]] <- wb_chem_dataset %>%
+      dplyr::filter(waterbody_id == wb_id, stat == stat_val) %>%
+      dplyr::select(date, chemical, value = conc_ng_L) %>%
+      dplyr::collect() %>%
+      dplyr::mutate(chem_key = unname(wb_chem_key_map[as.character(chemical)]))
+  }
+  wb_chem_grid_cache[[key]]
+}
+
+# All-waterbody long series for one chemical/statistic - Data Downloader and
+# the Spatial Datasets choropleth basis.
+wb_chem_full_cache <- new.env(parent = emptyenv())
+get_wb_chem_all_waterbodies_monthly <- function(chem_key, stat_val) {
+  key <- paste(chem_key, stat_val, sep = "||")
+  if (!exists(key, envir = wb_chem_full_cache, inherits = FALSE)) {
+    raw <- wb_chem_raw_label(chem_key)
+    wb_chem_full_cache[[key]] <- wb_chem_dataset %>%
+      dplyr::filter(chemical == raw, stat == stat_val) %>%
+      dplyr::select(date, waterbody_id, value = conc_ng_L) %>%
+      dplyr::collect() %>%
+      dplyr::mutate(unit = "ng/L")
+  }
+  wb_chem_full_cache[[key]]
+}
+
+# Time-averaged (2018-2022) value per water body for one chemical/statistic -
+# the basis of the Spatial Datasets choropleth for modelled water bodies.
+wb_chem_spatial_cache <- new.env(parent = emptyenv())
+get_wb_chem_spatial_summary <- function(chem_key, stat_val) {
+  key <- paste(chem_key, stat_val, sep = "||")
+  if (!exists(key, envir = wb_chem_spatial_cache, inherits = FALSE)) {
+    raw <- wb_chem_raw_label(chem_key)
+    wb_chem_spatial_cache[[key]] <- wb_chem_dataset %>%
+      dplyr::filter(chemical == raw, stat == stat_val) %>%
+      dplyr::group_by(waterbody_id) %>%
+      dplyr::summarise(value = mean(conc_ng_L, na.rm = TRUE), .groups = "drop") %>%
+      dplyr::collect() %>%
+      as.data.frame()
+  }
+  wb_chem_spatial_cache[[key]]
+}
+
+wbchem_variable_choices <- setNames(paste0("wbchem_", chem_keys), unname(chem_display_lookup[chem_keys]))
+is_wbchem_variable <- function(v) !is.null(v) && nzchar(v) && grepl("^wbchem_", v)
+wbchem_key_from_variable <- function(v) sub("^wbchem_", "", v)
+
+# Site Details "Modelled" panel selector - plain chem_key values (unprefixed,
+# like the measured chemical column names), no HYPE/physchem groups since
+# modelled water bodies only ever have chemical data.
+modelled_parameter_choices <- list(
+  "Modelled chemicals" = setNames(chem_keys, unname(chem_display_lookup[chem_keys]))
+)
 
 # Cache expensive tabular download extracts per variable to avoid repeatedly
 # scanning large Arrow datasets when users toggle between options.
@@ -668,8 +812,18 @@ prediction_variable_choices <- list(
   "Chemical concentrations (ng/L)" = chem_variable_choices
 )
 prediction_variable_labels <- setNames(
-  c(names(hype_variable_choices), names(chem_variable_choices)),
-  c(unname(hype_variable_choices), unname(chem_variable_choices))
+  c(names(hype_variable_choices), names(chem_variable_choices), names(wbchem_variable_choices)),
+  c(unname(hype_variable_choices), unname(chem_variable_choices), unname(wbchem_variable_choices))
+)
+
+# Spatial Datasets and Data Downloader also offer the modelled-by-waterbody
+# chemicals as a variable choice; Data Explorer does not (it switches basis
+# via its own Subbasin/Water body mode toggle instead, reusing the plain
+# chem_variable_choices ids either way - see NAVBAR 2 in the server).
+prediction_variable_choices_ext <- list(
+  "Hydrology & climate" = hype_variable_choices,
+  "Chemical concentrations · subbasin (daily, ng/L)" = chem_variable_choices,
+  "Chemical concentrations · water body (monthly, ng/L)" = wbchem_variable_choices
 )
 
 widget_prediction_variable <- selectInput(
@@ -681,7 +835,7 @@ widget_prediction_variable <- selectInput(
 widget_prediction_variable_spatial <- selectInput(
   inputId = "prediction_variable_spatial",
   label = "Model variable",
-  choices = prediction_variable_choices,
+  choices = prediction_variable_choices_ext,
   selected = "discharge")
 
 widget_spatial_period <- selectInput(
@@ -742,7 +896,8 @@ widget_download_variable <- selectInput(
                               "Water Temperature" = "water_temperature",
                               "Susp. Sediments" = "susp_sediments",
                               "Inorganic Nitrogen" = "inorganic_nitrogen"),
-    "Chemical concentrations (ng/L)" = chem_variable_choices
+    "Chemical concentrations · subbasin (daily, ng/L)" = chem_variable_choices,
+    "Chemical concentrations · water body (monthly, ng/L)" = wbchem_variable_choices
   ),
   selected = "precip")
 
@@ -765,7 +920,7 @@ widget_download_data_type <- selectInput(
 widget_download_spatial_layer <- selectInput(
   inputId = "dl_spatial_layer",
   label = "Spatial layer",
-  choices = c("Subbasins" = "subbasins", "Catchment" = "catchment"),
+  choices = c("Subbasins" = "subbasins", "Catchment" = "catchment", "Water bodies" = "waterbodies"),
   selected = "subbasins"
 )
 
@@ -823,6 +978,20 @@ ctx_subbasin_stats <- function(suffix) {
   )
 }
 
+# Segmented-control toggle between a "measured" (real samples) option and a
+# "modelled" (model output) option, reused by the Site Details sidebar (which
+# entity type is being browsed) and the Data Explorer sidebar (which spatial
+# unit is being queried) - the two pages use different value/label pairs, so
+# both are parameterized rather than hardcoded.
+entity_type_toggle <- function(id, measured_panel, modelled_panel,
+                               measured_label = "Measured", modelled_label = "Modelled",
+                               values = c("measured", "modelled")) {
+  div(class = "rail-toggle",
+      navset_pill(id = id,
+                  nav_panel(title = measured_label, value = values[1], measured_panel),
+                  nav_panel(title = modelled_label, value = values[2], modelled_panel)))
+}
+
 
 ### 1. User Interface
 
@@ -869,8 +1038,8 @@ ui <- page_navbar(
           label = "Layers",
           choices = c("Subbasins" = "subbasins",
                       "Operational catchment boundaries" = "opcat",
-                      "Waterbodies" = "waterbodies",
-                      "Monitoring sites" = "sites",
+                      "Waterbodies (modelled)" = "waterbodies",
+                      "Measured sites" = "measured_sites",
                       "Observed hydrology sites" = "observed_hydro",
                       "Chemical data coverage" = "chem_coverage"),
           selected = "subbasins"
@@ -898,7 +1067,7 @@ ui <- page_navbar(
     )
   ),
 
-  ## Panel 1c: Monitoring data - site detail view
+  ## Panel 1c: Site detail view - measured sites and modelled water bodies
   nav_panel(
     title = "Site Details",
     ctx_strip(
@@ -909,14 +1078,18 @@ ui <- page_navbar(
         ctx_stat("Land cover", uiOutput("ctx_landcover_site", inline = TRUE))
       ),
       mini_map = TRUE,
-      id_label = "Monitoring site"
+      id_label = textOutput("ctx_idlabel_site", inline = TRUE)
     ),
     layout_sidebar(
       fillable = TRUE,
       sidebar = sidebar(
         width = 220,
         title = "Sites",
-        div(class = "rail-list", uiOutput("site_rail"))
+        entity_type_toggle(
+          "site_entity_type",
+          measured_panel = div(class = "rail-list", uiOutput("measured_rail")),
+          modelled_panel = div(class = "rail-list", uiOutput("modelled_rail"))
+        )
       ),
       layout_columns(
         col_widths = c(7, 5),
@@ -925,8 +1098,15 @@ ui <- page_navbar(
           full_screen = TRUE,
           card_header(
             "Chemical occurrence",
-            span(class = "panel-note",
-                 "colour = concentration relative to this site's own maximum; grey = no sample")
+            conditionalPanel(
+              condition = "input.site_entity_type == 'modelled'",
+              popover(
+                actionLink("site_grid_opts", "Statistic \u25be", class = "pill"),
+                title = "Occurrence grid",
+                selectInput("site_grid_wb_stat", "Statistic", choices = chem_stat_choices, selected = "median")
+              )
+            ),
+            span(class = "panel-note", textOutput("site_chem_grid_note", inline = TRUE))
           ),
           div(
             style = "position: relative; height: 100%;",
@@ -945,10 +1125,10 @@ ui <- page_navbar(
             popover(
               actionLink("site_ts_opts", "Choose panels \u25be", class = "pill"),
               title = "Time series panels",
-              selectInput("site_ts_chemical_1", "Panel 1", choices = monitoring_parameter_choices),
-              selectInput("site_ts_chemical_2", "Panel 2", choices = monitoring_parameter_choices),
-              selectInput("site_ts_chemical_3", "Panel 3", choices = monitoring_parameter_choices),
-              selectInput("site_ts_chemical_4", "Panel 4", choices = monitoring_parameter_choices)
+              selectInput("site_ts_chemical_1", "Panel 1", choices = measured_parameter_choices),
+              selectInput("site_ts_chemical_2", "Panel 2", choices = measured_parameter_choices),
+              selectInput("site_ts_chemical_3", "Panel 3", choices = measured_parameter_choices),
+              selectInput("site_ts_chemical_4", "Panel 4", choices = measured_parameter_choices)
             ),
             span(class = "panel-note", "widest concentration range at this site")
           ),
@@ -977,18 +1157,34 @@ ui <- page_navbar(
       sidebar = sidebar(
         width = 248,
         title = "Controls \u00b7 all panels",
-        widget_scenario,
-        # One shared period control for the whole page - it used to be
-        # duplicated (a separate "Periods" dropdown fed only the Climate
-        # panel), which looked like two controls doing the same job. Kept
-        # outside the conditionalPanel below since the Climate panel needs
-        # it regardless of which Model variable is selected; only
-        # Absolute/Relative is HYPE-only (chemicals are a single historical
-        # daily record with no future period or baseline to compare against).
-        widget_prediction_period,
+        entity_type_toggle(
+          "de_entity_type",
+          measured_panel = NULL,
+          modelled_panel = selectizeInput(
+            "de_waterbody_search",
+            label = NULL,
+            choices = NULL,
+            options = list(placeholder = "Search water body", maxOptions = 50)
+          ),
+          measured_label = "Subbasin",
+          modelled_label = "Water body",
+          values = c("subbasin", "waterbody")
+        ),
         conditionalPanel(
-          condition = "input.prediction_variable && input.prediction_variable.indexOf('chem_') !== 0",
-          widget_plot_type
+          condition = "input.de_entity_type == 'subbasin'",
+          widget_scenario,
+          # One shared period control for the whole page - it used to be
+          # duplicated (a separate "Periods" dropdown fed only the Climate
+          # panel), which looked like two controls doing the same job. Kept
+          # outside the conditionalPanel below since the Climate panel needs
+          # it regardless of which Model variable is selected; only
+          # Absolute/Relative is HYPE-only (chemicals are a single historical
+          # daily record with no future period or baseline to compare against).
+          widget_prediction_period,
+          conditionalPanel(
+            condition = "input.prediction_variable && input.prediction_variable.indexOf('chem_') !== 0",
+            widget_plot_type
+          )
         ),
         widget_prediction_percentile,
         tags$hr(class = "hr"),
@@ -1067,12 +1263,20 @@ ui <- page_navbar(
         title = "Map layer",
         widget_prediction_variable_spatial,
         conditionalPanel(
-          condition = "input.prediction_variable_spatial && input.prediction_variable_spatial.indexOf('chem_') !== 0",
+          condition = paste0(
+            "input.prediction_variable_spatial && ",
+            "input.prediction_variable_spatial.indexOf('chem_') !== 0 && ",
+            "input.prediction_variable_spatial.indexOf('wbchem_') !== 0"
+          ),
           widget_spatial_period,
           widget_spatial_percentile
         ),
         conditionalPanel(
-          condition = "input.prediction_variable_spatial && input.prediction_variable_spatial.indexOf('chem_') === 0",
+          condition = paste0(
+            "input.prediction_variable_spatial && ",
+            "(input.prediction_variable_spatial.indexOf('chem_') === 0 || ",
+            "input.prediction_variable_spatial.indexOf('wbchem_') === 0)"
+          ),
           widget_spatial_chem_stat
         ),
         selectInput(
@@ -1111,13 +1315,16 @@ ui <- page_navbar(
         title = "Build a download",
         widget_download_variable,
         conditionalPanel(
-          condition = "input.dl_variable && input.dl_variable.indexOf('chem_') === 0",
+          condition = paste0(
+            "input.dl_variable && ",
+            "(input.dl_variable.indexOf('chem_') === 0 || input.dl_variable.indexOf('wbchem_') === 0)"
+          ),
           widget_download_chem_stat
         ),
         widget_download_data_type,
         widget_download_spatial_layer,
         widget_download_format,
-        helpText("Monthly p50 values for the current selection (full daily values for chemical concentrations). Units travel with the file."),
+        helpText("Monthly p50 values for the current selection (full daily values for chemical concentrations; water body variables are always exported for all 336 modelled water bodies, since this page has no water body picker). Units travel with the file."),
         downloadButton("download_data", "Download data")
       ),
       card(
@@ -1166,9 +1373,13 @@ server <- function(input, output, session) {
   # use reactive values to store the id from observing the shape click
   rv <- reactiveVal()
 
-  # Selected monitoring site (Site_id), set by clicking a marker on the
-  # Monitoring map; drives the Site Details tab.
-  rv_site <- reactiveVal()
+  # Selected measured site (Site_id) and modelled water body (water_body
+  # code), set by clicking a marker/polygon on the Map; drive the Site
+  # Details tab. Kept as two separate reactiveVals (rather than one shared id
+  # + a type flag) so toggling between Measured/Modelled on Site Details
+  # preserves each side's own last selection instead of clobbering it.
+  rv_measured_site <- reactiveVal()
+  rv_waterbody <- reactiveVal()
 
   projection_sources <- reactive({
     list(
@@ -1196,15 +1407,16 @@ server <- function(input, output, session) {
 
   chem_stat_labels <- setNames(names(chem_stat_choices), unname(chem_stat_choices))
 
-  # Daily series for the selected subbasin, chemical and statistic (or
-  # statistics - the "Conditions" selector allows more than one), feeding the
-  # chemical branch of the three Projections plots and the per-subbasin
-  # downloads.
+  # Daily series (subbasin mode) or monthly series (water body mode) for the
+  # selected chemical and statistic (or statistics - the "Conditions"
+  # selector allows more than one), feeding the chemical branch of the three
+  # Projections plots and the per-subbasin downloads. Because every
+  # Projections renderer already routes through this one reactive whenever
+  # is_chem_variable() is true, the water-body branch below is the only
+  # change those renderers need.
   chem_selected_series <- reactive({
-    req(rv())
     var <- input$prediction_variable
     req(is_chem_variable(var))
-    if (!(rv() %in% chem_subbasin_ids)) return(data.frame())
     chem_key <- chem_key_from_variable(var)
     # "Conditions" briefly still holds the HYPE p10/p50/p90 selection for one
     # reactive tick after prediction_variable switches to a chemical (the
@@ -1213,9 +1425,19 @@ server <- function(input, output, session) {
     # nothing instead of trying to open e.g. "..._p50_conc_by_SITE_ID.csv".
     stats <- intersect(unique(input$prediction_percentile), unname(chem_stat_choices))
     req(length(stats) > 0)
-    dplyr::bind_rows(lapply(stats, function(s) {
-      get_chem_subbasin_series(chem_key, s, rv()) %>% dplyr::mutate(stat = s)
-    }))
+
+    if (identical(input$de_entity_type, "waterbody")) {
+      req(rv_de_waterbody())
+      dplyr::bind_rows(lapply(stats, function(s) {
+        get_wb_chem_series(chem_key, s, rv_de_waterbody()) %>% dplyr::mutate(stat = s)
+      }))
+    } else {
+      req(rv())
+      if (!(rv() %in% chem_subbasin_ids)) return(data.frame())
+      dplyr::bind_rows(lapply(stats, function(s) {
+        get_chem_subbasin_series(chem_key, s, rv()) %>% dplyr::mutate(stat = s)
+      }))
+    }
   })
 
   selected_opcat <- reactive({
@@ -1311,7 +1533,7 @@ server <- function(input, output, session) {
   observeEvent(input$map_layers, {
     proxy <- leafletProxy("basemap")
     proxy %>% clearGroup("opcat") %>% clearGroup("waterbodies") %>%
-      clearGroup("sites") %>% clearGroup("observed_hydro") %>% clearGroup("chem_coverage")
+      clearGroup("measured_sites") %>% clearGroup("observed_hydro") %>% clearGroup("chem_coverage")
 
     if ("subbasins" %in% input$map_layers) {
       proxy %>% showGroup("Subbasins")
@@ -1329,18 +1551,32 @@ server <- function(input, output, session) {
       proxy %>% addPolygons(
         data = waterbody_opcat_shp,
         fill = TRUE,
-        fillColor = ~ifelse(is.na(opcat_name), "#e0dede", pal_opcat(opcat_name)),
-        fillOpacity = 0.45,
+        fillColor = ~ifelse(!has_model_data, ec$rule_light,
+                            ifelse(is.na(opcat_name), "#e0dede", pal_opcat(opcat_name))),
+        fillOpacity = ~ifelse(has_model_data, 0.45, 0.2),
         color = ec$ink,
         weight = 0.75,
         opacity = 0.5,
-        label = ~paste0(water_bod0, ifelse(is.na(opcat_name), "", paste0(" · ", opcat_name))),
+        layerId = ~water_body,
+        label = ~paste0(water_bod0, ifelse(is.na(opcat_name), "", paste0(" · ", opcat_name)),
+                        ifelse(has_model_data, "", " (no modelled data)")),
+        popup = ~ifelse(
+          has_model_data,
+          paste0(
+            "<strong>", water_bod0, "</strong>",
+            ifelse(is.na(opcat_name), "", paste0("<br>", opcat_name)),
+            "<br><a href='#' onclick=\"Shiny.setInputValue('open_waterbody_details', '",
+            water_body,
+            "', {priority: 'event'}); return false;\">Open in Site Details \u2192</a>"
+          ),
+          paste0("<strong>", water_bod0, "</strong><br><em>No modelled chemical data available</em>")
+        ),
         group = "waterbodies"
       )
     }
-    if ("sites" %in% input$map_layers) {
+    if ("measured_sites" %in% input$map_layers) {
       proxy %>% addCircleMarkers(
-        data = df_monitoring_sites, lng = ~Longitude, lat = ~Latitude,
+        data = df_measured_sites, lng = ~Longitude, lat = ~Latitude,
         layerId = ~Site_id,
         radius = 5, color = "#ffffff", weight = 1.5, fillColor = ec$ink,
         fillOpacity = 0.95, label = ~Site_full_name,
@@ -1350,7 +1586,7 @@ server <- function(input, output, session) {
           Site_id,
           "', {priority: 'event'}); return false;\">Open in Site Details \u2192</a>"
         ),
-        group = "sites"
+        group = "measured_sites"
       )
     }
     if ("observed_hydro" %in% input$map_layers) {
@@ -1386,11 +1622,20 @@ server <- function(input, output, session) {
       add_basemap_tiles(input$map_basemap)
   }, ignoreInit = TRUE)
 
-  # Open Site Details from a monitoring site marker's popup link, same
+  # Open Site Details from a measured site marker's popup link, same
   # "click marker -> pick from its popup" pattern as the subbasin/observed-
   # hydrology "Open in Data Explorer" links.
   observeEvent(input$open_site_details, {
-    rv_site(input$open_site_details)
+    rv_measured_site(input$open_site_details)
+    bslib::nav_select("site_entity_type", selected = "measured", session = session)
+    bslib::nav_select("main_nav", selected = "Site Details", session = session)
+  })
+
+  # Open Site Details from a water body polygon's popup link, landing on the
+  # "Modelled" side of the Site Details toggle with that water body selected.
+  observeEvent(input$open_waterbody_details, {
+    rv_waterbody(input$open_waterbody_details)
+    bslib::nav_select("site_entity_type", selected = "modelled", session = session)
     bslib::nav_select("main_nav", selected = "Site Details", session = session)
   })
 
@@ -1502,53 +1747,98 @@ server <- function(input, output, session) {
 
   ### SITE DETAILS ###
 
-  # Resets the four time series selectors to that site's top-range chemicals,
-  # so switching sites gives a fresh, sensible default rather than carrying
-  # over the previous site's picks.
-  observeEvent(rv_site(), {
-    top4 <- selected_site_top_chemicals()$parameter
+  # Resets the four time series selectors to the active entity's top-range
+  # chemicals, so switching sites/water bodies or toggling Measured/Modelled
+  # gives a fresh, sensible default rather than carrying over the previous
+  # selection's picks.
+  observeEvent(list(input$site_entity_type, rv_measured_site(), rv_waterbody()), {
+    is_modelled <- identical(input$site_entity_type, "modelled")
+    if (is_modelled) {
+      req(rv_waterbody())
+      choices <- modelled_parameter_choices
+      top4 <- selected_waterbody_top_chemicals()$chem_key
+      fallback <- chem_keys
+    } else {
+      req(rv_measured_site())
+      choices <- measured_parameter_choices
+      top4 <- selected_measured_site_top_chemicals()$parameter
+      fallback <- measured_chemical_cols
+    }
     if (length(top4) < 4) {
-      top4 <- c(top4, setdiff(monitoring_chemical_cols, top4))[seq_len(4)]
+      top4 <- c(top4, setdiff(fallback, top4))[seq_len(4)]
     }
     for (i in seq_len(4)) {
-      updateSelectInput(session, paste0("site_ts_chemical_", i), selected = top4[i])
+      updateSelectInput(session, paste0("site_ts_chemical_", i), choices = choices, selected = top4[i])
     }
-  }, ignoreNULL = TRUE)
+  }, ignoreNULL = FALSE)
 
-  # Full monitoring record (all parameters, all weeks) for the selected site
-  selected_site_long <- reactive({
-    req(rv_site())
-    df_monitoring_long %>% dplyr::filter(Site_id == rv_site())
+  # Full measured record (all parameters, all weeks) for the selected site
+  selected_measured_site_long <- reactive({
+    req(rv_measured_site())
+    df_measured_long %>% dplyr::filter(Site_id == rv_measured_site())
   })
 
-  selected_site_summary <- reactive({
-    req(rv_site())
-    df_monitoring_site_summary %>% dplyr::filter(Site_id == rv_site())
+  selected_measured_site_summary <- reactive({
+    req(rv_measured_site())
+    df_measured_site_summary %>% dplyr::filter(Site_id == rv_measured_site())
   })
 
-  # Monitoring + Site Details context strips (site-scoped, so registered
-  # separately from the subbasin strips above).
-  site_display_name <- reactive({
-    if (is.null(rv_site())) return(NULL)
-    row <- df_monitoring_sites %>% filter(Site_id == rv_site())
+  # Site Details context strips (site/water-body-scoped, so registered
+  # separately from the subbasin strips above). Both entity types share one
+  # set of ctx_* outputs, branching internally on input$site_entity_type.
+  measured_site_display_name <- reactive({
+    if (is.null(rv_measured_site())) return(NULL)
+    row <- df_measured_sites %>% filter(Site_id == rv_measured_site())
     if (nrow(row) == 0) NULL else row$Site_full_name[1]
   })
 
-  output$ctx_id_site <- renderText({ site_display_name() %||% "No site" })
+  waterbody_display_name <- reactive({
+    if (is.null(rv_waterbody())) return(NULL)
+    row <- waterbody_opcat_shp %>% sf::st_drop_geometry() %>% filter(water_body == rv_waterbody())
+    if (nrow(row) == 0) NULL else row$water_bod0[1]
+  })
+
+  output$ctx_idlabel_site <- renderText({
+    if (identical(input$site_entity_type, "modelled")) "Modelled water body" else "Measured site"
+  })
+
+  output$ctx_id_site <- renderText({
+    if (identical(input$site_entity_type, "modelled")) {
+      waterbody_display_name() %||% "No water body"
+    } else {
+      measured_site_display_name() %||% "No site"
+    }
+  })
   output$ctx_sub_site <- renderText({
-    if (is.null(rv_site())) return("Pick a site in the list")
-    row <- df_monitoring_sites %>% filter(Site_id == rv_site())
-    paste0(rv_site(), " \u00b7 ", round(row$Latitude[1], 4), ", ", round(row$Longitude[1], 4))
+    if (identical(input$site_entity_type, "modelled")) {
+      if (is.null(rv_waterbody())) return("Pick a water body in the list")
+      row <- waterbody_opcat_shp %>% sf::st_drop_geometry() %>% filter(water_body == rv_waterbody())
+      if (nrow(row) == 0) return(rv_waterbody())
+      paste0(rv_waterbody(), ifelse(is.na(row$opcat_name[1]), "", paste0(" · ", row$opcat_name[1])))
+    } else {
+      if (is.null(rv_measured_site())) return("Pick a site in the list")
+      row <- df_measured_sites %>% filter(Site_id == rv_measured_site())
+      paste0(rv_measured_site(), " · ", round(row$Latitude[1], 4), ", ", round(row$Longitude[1], 4))
+    }
   })
   output$ctx_summary_site <- renderText({
-    if (is.null(rv_site())) return("Select a monitoring site to see its background.")
-    info <- monitoring_site_info[[rv_site()]]
-    if (is.null(info)) return(paste("No site information available yet for", rv_site()))
-    info$summary
+    if (identical(input$site_entity_type, "modelled")) {
+      if (is.null(rv_waterbody())) return("Select a modelled water body to see its background.")
+      info <- modelled_site_info[[rv_waterbody()]]
+      if (is.null(info)) return(paste("No water body information available yet for", rv_waterbody()))
+      info$summary
+    } else {
+      if (is.null(rv_measured_site())) return("Select a measured site to see its background.")
+      info <- measured_site_info[[rv_measured_site()]]
+      if (is.null(info)) return(paste("No site information available yet for", rv_measured_site()))
+      info$summary
+    }
   })
   output$ctx_landcover_site <- renderUI({
-    if (is.null(rv_site())) return(NULL)
-    info <- monitoring_site_info[[rv_site()]]
+    is_modelled <- identical(input$site_entity_type, "modelled")
+    active_id <- if (is_modelled) rv_waterbody() else rv_measured_site()
+    if (is.null(active_id)) return(NULL)
+    info <- if (is_modelled) modelled_site_info[[rv_waterbody()]] else measured_site_info[[rv_measured_site()]]
     if (is.null(info) || length(info$landcover) == 0) return(NULL)
 
     lc <- info$landcover
@@ -1571,21 +1861,34 @@ server <- function(input, output, session) {
       setView(lng = -1.16, lat = 53.75, zoom = 7)
   })
 
-  observeEvent(rv_site(), {
-    row <- df_monitoring_sites %>% dplyr::filter(Site_id == rv_site())
-    req(nrow(row) == 1)
-    leafletProxy("ctx_map_site") %>%
-      clearMarkers() %>%
-      setView(lng = row$Longitude, lat = row$Latitude, zoom = 10) %>%
-      addCircleMarkers(lng = row$Longitude, lat = row$Latitude,
-                       radius = 6, color = ec$accent, weight = 2,
-                       fillColor = ec$accent, fillOpacity = 1)
+  observeEvent(list(input$site_entity_type, rv_measured_site(), rv_waterbody()), {
+    if (identical(input$site_entity_type, "modelled")) {
+      req(rv_waterbody())
+      shp <- waterbody_opcat_shp %>% filter(water_body == rv_waterbody())
+      req(nrow(shp) == 1)
+      bb <- as.numeric(sf::st_bbox(shp))
+      leafletProxy("ctx_map_site") %>%
+        clearMarkers() %>% clearShapes() %>%
+        addPolygons(data = shp, fillColor = ec$accent, fillOpacity = 0.5,
+                    color = ec$accent, weight = 2) %>%
+        fitBounds(bb[1], bb[2], bb[3], bb[4])
+    } else {
+      req(rv_measured_site())
+      row <- df_measured_sites %>% dplyr::filter(Site_id == rv_measured_site())
+      req(nrow(row) == 1)
+      leafletProxy("ctx_map_site") %>%
+        clearMarkers() %>% clearShapes() %>%
+        setView(lng = row$Longitude, lat = row$Latitude, zoom = 10) %>%
+        addCircleMarkers(lng = row$Longitude, lat = row$Latitude,
+                         radius = 6, color = ec$accent, weight = 2,
+                         fillColor = ec$accent, fillOpacity = 1)
+    }
   })
 
-  # Site list rail (replaces the full-width selectInput)
-  output$site_rail <- renderUI({
-    active <- rv_site()
-    sites <- df_monitoring_sites %>% arrange(Site_full_name)
+  # Measured sites rail (replaces the full-width selectInput)
+  output$measured_rail <- renderUI({
+    active <- rv_measured_site()
+    sites <- df_measured_sites %>% arrange(Site_full_name)
     tagList(lapply(seq_len(nrow(sites)), function(i) {
       id <- sites$Site_id[i]
       div(
@@ -1597,12 +1900,32 @@ server <- function(input, output, session) {
     }))
   })
 
-  observeEvent(input$site_pick, { rv_site(input$site_pick) })
+  observeEvent(input$site_pick, { rv_measured_site(input$site_pick) })
+
+  # Modelled water bodies rail - only the 336 with modelled data are listed
+  # (the other 34 geojson polygons are shown greyed-out on the Map but are
+  # never selectable here or anywhere else in the app).
+  output$modelled_rail <- renderUI({
+    active <- rv_waterbody()
+    wbs <- waterbody_opcat_shp %>% sf::st_drop_geometry() %>%
+      dplyr::filter(has_model_data) %>% dplyr::arrange(water_bod0)
+    tagList(lapply(seq_len(nrow(wbs)), function(i) {
+      id <- wbs$water_body[i]
+      div(
+        class = paste("rail-row", if (!is.null(active) && identical(active, id)) "is-active" else ""),
+        onclick = paste0("Shiny.setInputValue('waterbody_pick', ", jsonlite::toJSON(id, auto_unbox = TRUE),
+                         ", {priority:'event'})"),
+        span(wbs$water_bod0[i])
+      )
+    }))
+  })
+
+  observeEvent(input$waterbody_pick, { rv_waterbody(input$waterbody_pick) })
 
   # The four organic micropollutants with the greatest concentration range
-  # at the selected site, used to auto-pick the time series panels below.
-  selected_site_top_chemicals <- reactive({
-    selected_site_long() %>%
+  # at the selected measured site, used to auto-pick the time series panels.
+  selected_measured_site_top_chemicals <- reactive({
+    selected_measured_site_long() %>%
       dplyr::filter(parameter_group == "Organic micropollutant") %>%
       dplyr::group_by(parameter, parameter_label) %>%
       dplyr::summarise(
@@ -1617,12 +1940,31 @@ server <- function(input, output, session) {
       dplyr::slice_head(n = 4)
   })
 
-  # Chemical x week occurrence grid data for the selected site. Colour is a
-  # log-scaled concentration relative to that parameter's own maximum at this
-  # site (0-1). Non-detects sit at the bottom of the scale; missing samples
-  # are a distinct flat grey via NA.
-  site_chem_grid_data <- reactive({
-    df_grid <- selected_site_long() %>%
+  # The four modelled chemicals with the greatest concentration range at the
+  # selected water body (at the median statistic), mirroring the measured
+  # equivalent above.
+  selected_waterbody_top_chemicals <- reactive({
+    req(rv_waterbody())
+    get_wb_chem_grid(rv_waterbody(), "median") %>%
+      dplyr::group_by(chem_key) %>%
+      dplyr::summarise(
+        range_val = {
+          rng <- suppressWarnings(range(value, na.rm = TRUE))
+          if (all(is.finite(rng))) diff(rng) else NA_real_
+        },
+        .groups = "drop"
+      ) %>%
+      dplyr::filter(is.finite(range_val)) %>%
+      dplyr::arrange(dplyr::desc(range_val)) %>%
+      dplyr::slice_head(n = 4)
+  })
+
+  # Chemical x week occurrence grid data for the selected measured site.
+  # Colour is a log-scaled concentration relative to that parameter's own
+  # maximum at this site (0-1). Non-detects sit at the bottom of the scale;
+  # missing samples are a distinct flat grey via NA.
+  measured_chem_grid_data <- reactive({
+    df_grid <- selected_measured_site_long() %>%
       dplyr::group_by(parameter) %>%
       dplyr::mutate(
         max_detected = suppressWarnings(max(value_num[status == "Detected"], na.rm = TRUE)),
@@ -1643,43 +1985,107 @@ server <- function(input, output, session) {
     df_grid
   })
 
-  output$site_chem_grid <- renderPlot({
-    df_grid <- site_chem_grid_data()
+  # Chemical x month concentration grid data for the selected modelled water
+  # body, at the chosen statistic. Colour is a log-scaled concentration
+  # relative to that chemical's own maximum at this water body (0-1) - there
+  # is no detect/non-detect concept here, every cell has a modelled value.
+  wb_chem_grid_data <- reactive({
+    req(rv_waterbody())
+    stat_val <- input$site_grid_wb_stat %||% "median"
+    df_grid <- get_wb_chem_grid(rv_waterbody(), stat_val) %>%
+      dplyr::group_by(chem_key) %>%
+      dplyr::mutate(
+        max_val = suppressWarnings(max(value, na.rm = TRUE)),
+        max_val = ifelse(is.finite(max_val) & max_val > 0, max_val, 1),
+        color_value = log1p(pmax(value, 0)) / log1p(max_val)
+      ) %>%
+      dplyr::ungroup() %>%
+      dplyr::mutate(chem_label = unname(chem_display_lookup[chem_key]))
 
-    ggplot(df_grid, aes(x = Date, y = parameter_label, fill = color_value)) +
-      geom_tile(colour = ec$ground, linewidth = 0.4) +
-      scale_fill_gradientn(
-        colours = c(ec$rule_light, "#ffc4b8", "#ff563c", ec$accent_text),
-        na.value = ec$surface,
-        limits = c(0, 1),
-        guide = guide_colourbar(barheight = grid::unit(8, "pt"), barwidth = grid::unit(90, "pt"))
-      ) +
-      scale_x_date(expand = c(0, 0), date_labels = "%b %Y") +
-      labs(x = NULL, y = NULL, fill = NULL) +
-      theme_ecomix(11) +
-      theme(
-        panel.grid = element_blank(),
-        axis.line.x = element_blank(),
-        axis.text.y = element_text(size = 9, colour = ec$ink),
-        axis.text.x = element_text(size = 9, angle = 45, hjust = 1)
-      )
+    chem_order <- df_grid %>% dplyr::distinct(chem_label) %>% dplyr::arrange(chem_label) %>% dplyr::pull(chem_label)
+    df_grid$chem_label <- factor(df_grid$chem_label, levels = rev(chem_order))
+    df_grid
   })
 
-  # Hover tooltip for the occurrence grid.
+  output$site_chem_grid_note <- renderText({
+    if (identical(input$site_entity_type, "modelled")) {
+      "colour = concentration relative to this water body's own maximum"
+    } else {
+      "colour = concentration relative to this site's own maximum; grey = no sample"
+    }
+  })
+
+  output$site_chem_grid <- renderPlot({
+    if (identical(input$site_entity_type, "modelled")) {
+      req(rv_waterbody())
+      df_grid <- wb_chem_grid_data()
+
+      ggplot(df_grid, aes(x = date, y = chem_label, fill = color_value)) +
+        geom_tile(colour = ec$ground, linewidth = 0.4) +
+        scale_fill_gradientn(
+          colours = c(ec$rule_light, "#ffc4b8", "#ff563c", ec$accent_text),
+          na.value = ec$surface,
+          limits = c(0, 1),
+          guide = guide_colourbar(barheight = grid::unit(8, "pt"), barwidth = grid::unit(90, "pt"))
+        ) +
+        scale_x_date(expand = c(0, 0), date_labels = "%b %Y") +
+        labs(x = NULL, y = NULL, fill = NULL) +
+        theme_ecomix(11) +
+        theme(
+          panel.grid = element_blank(),
+          axis.line.x = element_blank(),
+          axis.text.y = element_text(size = 9, colour = ec$ink),
+          axis.text.x = element_text(size = 9, angle = 45, hjust = 1)
+        )
+    } else {
+      df_grid <- measured_chem_grid_data()
+
+      ggplot(df_grid, aes(x = Date, y = parameter_label, fill = color_value)) +
+        geom_tile(colour = ec$ground, linewidth = 0.4) +
+        scale_fill_gradientn(
+          colours = c(ec$rule_light, "#ffc4b8", "#ff563c", ec$accent_text),
+          na.value = ec$surface,
+          limits = c(0, 1),
+          guide = guide_colourbar(barheight = grid::unit(8, "pt"), barwidth = grid::unit(90, "pt"))
+        ) +
+        scale_x_date(expand = c(0, 0), date_labels = "%b %Y") +
+        labs(x = NULL, y = NULL, fill = NULL) +
+        theme_ecomix(11) +
+        theme(
+          panel.grid = element_blank(),
+          axis.line.x = element_blank(),
+          axis.text.y = element_text(size = 9, colour = ec$ink),
+          axis.text.x = element_text(size = 9, angle = 45, hjust = 1)
+        )
+    }
+  })
+
+  # Hover tooltip for the occurrence/concentration grid.
   output$site_chem_grid_tooltip <- renderUI({
     hover <- input$site_chem_grid_hover
     req(hover)
 
-    point <- nearPoints(site_chem_grid_data(), hover,
-                         xvar = "Date", yvar = "parameter_label",
-                         threshold = 15, maxpoints = 1)
-    if (nrow(point) == 0) return(NULL)
-
-    detail_text <- switch(point$status[1],
-      "Detected" = paste0("Value: ", round(point$value_num[1], 3)),
-      "Non-detect" = "Not detected (below LOD)",
-      "No sample" = "No sample taken"
-    )
+    if (identical(input$site_entity_type, "modelled")) {
+      point <- nearPoints(wb_chem_grid_data(), hover,
+                           xvar = "date", yvar = "chem_label",
+                           threshold = 15, maxpoints = 1)
+      if (nrow(point) == 0) return(NULL)
+      detail_text <- paste0("Value: ", round(point$value[1], 3), " ng/L")
+      label_text <- as.character(point$chem_label[1])
+      date_text <- format(point$date[1], "%b %Y")
+    } else {
+      point <- nearPoints(measured_chem_grid_data(), hover,
+                           xvar = "Date", yvar = "parameter_label",
+                           threshold = 15, maxpoints = 1)
+      if (nrow(point) == 0) return(NULL)
+      detail_text <- switch(point$status[1],
+        "Detected" = paste0("Value: ", round(point$value_num[1], 3)),
+        "Non-detect" = "Not detected (below LOD)",
+        "No sample" = "No sample taken"
+      )
+      label_text <- as.character(point$parameter_label[1])
+      date_text <- format(point$Date[1], "%d %b %Y")
+    }
 
     style <- paste0(
       "position:absolute; z-index:1000; pointer-events:none; ",
@@ -1690,40 +2096,88 @@ server <- function(input, output, session) {
 
     div(
       style = style,
-      tags$strong(point$parameter_label[1]), tags$br(),
-      format(point$Date[1], "%d %b %Y"), tags$br(),
+      tags$strong(label_text), tags$br(),
+      date_text, tags$br(),
       detail_text
     )
   })
 
   # Stacked time series for the four chemicals chosen in the popover.
   output$site_time_series <- renderPlot({
-    params <- vapply(seq_len(4), function(i) input[[paste0("site_ts_chemical_", i)]] %||% "", character(1))
-    req(all(nzchar(params)))
+    if (identical(input$site_entity_type, "modelled")) {
+      req(rv_waterbody())
+      chem_key_vals <- vapply(seq_len(4), function(i) input[[paste0("site_ts_chemical_", i)]] %||% "", character(1))
+      req(all(nzchar(chem_key_vals)))
+      stat_val <- input$site_grid_wb_stat %||% "median"
 
-    df_ts <- dplyr::bind_rows(lapply(seq_along(params), function(i) {
-      selected_site_long() %>%
-        dplyr::filter(parameter == params[i]) %>%
-        dplyr::mutate(panel_label = monitoring_parameter_label(params[i]))
-    }))
-    panel_levels <- unique(monitoring_parameter_label(params))
-    df_ts$panel_label <- factor(df_ts$panel_label, levels = panel_levels)
+      df_ts <- dplyr::bind_rows(lapply(chem_key_vals, function(k) {
+        get_wb_chem_series(k, stat_val, rv_waterbody()) %>%
+          dplyr::mutate(panel_label = unname(chem_display_lookup[k]))
+      }))
+      panel_levels <- unname(chem_display_lookup[chem_key_vals])
+      df_ts$panel_label <- factor(df_ts$panel_label, levels = panel_levels)
 
-    ggplot(df_ts, aes(x = Date, y = value_num)) +
-      geom_line(colour = ec$accent, na.rm = TRUE) +
-      geom_point(aes(colour = status), size = 1.6, na.rm = TRUE) +
-      scale_colour_manual(
-        breaks = c("Detected", "Non-detect"),
-        values = c("Detected" = ec$accent, "Non-detect" = ec$ink_dim)
-      ) +
-      scale_x_date(expand = expansion(mult = c(0.02, 0.06))) +
-      facet_wrap(vars(panel_label), ncol = 1, scales = "free_y") +
-      labs(x = NULL, y = NULL, caption = "Gaps indicate no sample taken.") +
-      theme_ecomix(11)
+      ggplot(df_ts, aes(x = date, y = value)) +
+        geom_line(colour = ec$accent, na.rm = TRUE) +
+        geom_point(colour = ec$accent, size = 1.6, na.rm = TRUE) +
+        scale_x_date(expand = expansion(mult = c(0.02, 0.06))) +
+        facet_wrap(vars(panel_label), ncol = 1, scales = "free_y") +
+        labs(x = NULL, y = NULL, caption = "Monthly modelled concentration, 2018-2022.") +
+        theme_ecomix(11)
+    } else {
+      params <- vapply(seq_len(4), function(i) input[[paste0("site_ts_chemical_", i)]] %||% "", character(1))
+      req(all(nzchar(params)))
+
+      df_ts <- dplyr::bind_rows(lapply(seq_along(params), function(i) {
+        selected_measured_site_long() %>%
+          dplyr::filter(parameter == params[i]) %>%
+          dplyr::mutate(panel_label = measured_parameter_label(params[i]))
+      }))
+      panel_levels <- unique(measured_parameter_label(params))
+      df_ts$panel_label <- factor(df_ts$panel_label, levels = panel_levels)
+
+      ggplot(df_ts, aes(x = Date, y = value_num)) +
+        geom_line(colour = ec$accent, na.rm = TRUE) +
+        geom_point(aes(colour = status), size = 1.6, na.rm = TRUE) +
+        scale_colour_manual(
+          breaks = c("Detected", "Non-detect"),
+          values = c("Detected" = ec$accent, "Non-detect" = ec$ink_dim)
+        ) +
+        scale_x_date(expand = expansion(mult = c(0.02, 0.06))) +
+        facet_wrap(vars(panel_label), ncol = 1, scales = "free_y") +
+        labs(x = NULL, y = NULL, caption = "Gaps indicate no sample taken.") +
+        theme_ecomix(11)
+    }
   })
 
 
   ### NAVBAR 2 - DATA EXPLORER ###
+
+  # Selected water body for Data Explorer's "Water body" mode - section-local
+  # (unlike rv_waterbody on Site Details) since nothing outside this section
+  # needs it.
+  rv_de_waterbody <- reactiveVal()
+
+  updateSelectizeInput(session, "de_waterbody_search",
+                       choices = waterbody_opcat_shp %>% sf::st_drop_geometry() %>%
+                         dplyr::filter(has_model_data) %>% dplyr::arrange(water_bod0) %>%
+                         { setNames(.$water_body, .$water_bod0) },
+                       selected = character(0), server = TRUE)
+
+  observeEvent(input$de_waterbody_search, {
+    req(nzchar(input$de_waterbody_search))
+    rv_de_waterbody(input$de_waterbody_search)
+  }, ignoreInit = TRUE)
+
+  # Model variable choices are HYPE + subbasin chemicals in Subbasin mode,
+  # chemicals only in Water body mode (there's no per-water-body hydrology).
+  observeEvent(input$de_entity_type, {
+    if (identical(input$de_entity_type, "waterbody")) {
+      updateSelectInput(session, "prediction_variable", choices = chem_variable_choices)
+    } else {
+      updateSelectInput(session, "prediction_variable", choices = prediction_variable_choices)
+    }
+  }, ignoreInit = TRUE)
 
   # Card-header pill labels, so the header states the current choice rather
   # than a sidebar restating it.
@@ -1772,6 +2226,9 @@ server <- function(input, output, session) {
 
   ## Plot 1: Climate
   output$climate_plot <- renderPlot({
+    if (identical(input$de_entity_type, "waterbody")) {
+      return(no_data_plot("Not available in Water body mode"))
+    }
     if (is.null(rv())) return(NULL)
 
     projection_data <- projection_sources()
@@ -1830,6 +2287,9 @@ server <- function(input, output, session) {
 
   ## Plot 2 - Observations
   output$observation_plot <- renderPlot({
+    if (identical(input$de_entity_type, "waterbody")) {
+      return(no_data_plot("Not available in Water body mode"))
+    }
     if (is.null(rv())) return(NULL)
 
     sub_observation_variable <- input$observation_variable
@@ -2213,11 +2673,22 @@ server <- function(input, output, session) {
     sub_variable <- input$prediction_variable_spatial[1]
 
     # Chemicals have no scenario/period - the map shows one time-averaged
-    # (whole 2018-2022 record) value per subbasin for the chosen statistic.
-    # The result is shaped to match df_map_input's columns (hype_variable,
-    # subbasin, p50_ensemble, unit, prediction_percentile) so the rendering
-    # and context-strip code below needs no branching of its own.
-    if (is_chem_variable(sub_variable)) {
+    # (whole 2018-2022 record) value per subbasin (or, for modelled water
+    # body chemicals, per water body) for the chosen statistic. The result is
+    # shaped to match df_map_input's columns (hype_variable, subbasin,
+    # p50_ensemble, unit, prediction_percentile) so the rendering and
+    # context-strip code below needs no branching of its own. The water body
+    # branch has no "subbasin" concept, so it carries a placeholder NA
+    # subbasin column purely so the context-strip's existing
+    # filter(subbasin == rv()) calls don't error - they simply find no match
+    # and read "-", since this page has no water-body-selection context strip.
+    if (is_wbchem_variable(sub_variable)) {
+      chem_key <- wbchem_key_from_variable(sub_variable)
+      stat <- input$prediction_stat_spatial_chem %||% "median"
+      get_wb_chem_spatial_summary(chem_key, stat) %>%
+        dplyr::mutate(hype_variable = sub_variable, p50_ensemble = value,
+                      unit = "ng/L", prediction_percentile = stat, subbasin = NA_integer_)
+    } else if (is_chem_variable(sub_variable)) {
       chem_key <- chem_key_from_variable(sub_variable)
       stat <- input$prediction_stat_spatial_chem %||% "median"
       get_chem_spatial_summary(chem_key, stat) %>%
@@ -2239,12 +2710,16 @@ server <- function(input, output, session) {
   output$prediction_map <- renderLeaflet({
     sub_variable <- input$prediction_variable_spatial[1]
     df_sub <- spatial_layer_data()
-    shp_map <- left_join(subbasin_shp, df_sub, by = c("Id" = "subbasin")) %>% filter(!is.na(hype_variable))
+    shp_map <- if (is_wbchem_variable(sub_variable)) {
+      left_join(waterbody_opcat_shp, df_sub, by = c("water_body" = "waterbody_id")) %>% filter(!is.na(hype_variable))
+    } else {
+      left_join(subbasin_shp, df_sub, by = c("Id" = "subbasin")) %>% filter(!is.na(hype_variable))
+    }
 
     pal <- colorNumeric(palette = "viridis", domain = shp_map$p50_ensemble)
     legend_title <- if (nrow(df_sub) == 0) {
       "No data"
-    } else if (is_chem_variable(sub_variable)) {
+    } else if (is_chem_variable(sub_variable) || is_wbchem_variable(sub_variable)) {
       paste0(chem_stat_labels[df_sub$prediction_percentile[1]], " conc. (ng/L)")
     } else {
       paste0("P", df_sub$prediction_percentile[1])
@@ -2295,6 +2770,14 @@ server <- function(input, output, session) {
 
   ### NAVBAR 4 - DATA DOWNLOADER ###
 
+  # Default the spatial layer to "Water bodies" once a modelled water-body
+  # variable is picked, since that's the only layer with matching data.
+  observeEvent(input$dl_variable, {
+    if (is_wbchem_variable(input$dl_variable)) {
+      updateSelectInput(session, "dl_spatial_layer", selected = "waterbodies")
+    }
+  }, ignoreInit = TRUE)
+
   observeEvent(input$dl_data_type, {
     if (input$dl_data_type == "tabular") {
       updateSelectInput(
@@ -2315,7 +2798,11 @@ server <- function(input, output, session) {
 
   downloader_tabular_all_data <- reactive({
     req(input$dl_variable)
-    if (is_chem_variable(input$dl_variable)) {
+    if (is_wbchem_variable(input$dl_variable)) {
+      chem_key <- wbchem_key_from_variable(input$dl_variable)
+      stat <- input$dl_chem_stat %||% "median"
+      get_wb_chem_all_waterbodies_monthly(chem_key, stat)
+    } else if (is_chem_variable(input$dl_variable)) {
       chem_key <- chem_key_from_variable(input$dl_variable)
       stat <- input$dl_chem_stat %||% "median"
       get_chem_all_subbasins_daily(chem_key, stat)
@@ -2325,11 +2812,44 @@ server <- function(input, output, session) {
   })
 
   downloader_tabular_data <- reactive({
+    # This page has no water-body picker, so a wbchem tabular download is
+    # always all 336 modelled water bodies - unlike subbasin variables, which
+    # filter to the currently rv()-selected subbasin.
+    if (is_wbchem_variable(input$dl_variable)) {
+      return(downloader_tabular_all_data())
+    }
     req(rv())
     downloader_tabular_all_data() %>% filter(subbasin == rv())
   })
 
   downloader_spatial_data <- reactive({
+    # "Water bodies" layer only makes sense with a wbchem variable and vice
+    # versa (wbchem data has no subbasin/catchment mapping) - any mismatch
+    # returns an empty result rather than erroring on a missing column.
+    if (identical(input$dl_spatial_layer, "waterbodies") != is_wbchem_variable(input$dl_variable)) {
+      return(subbasin_shp %>% filter(FALSE) %>%
+               mutate(spatial_layer = input$dl_spatial_layer, variable = input$dl_variable))
+    }
+
+    if (identical(input$dl_spatial_layer, "waterbodies")) {
+      tab_data <- downloader_tabular_all_data()
+      tab_summary_by_wb <- tab_data %>%
+        group_by(waterbody_id) %>%
+        summarise(
+          n_records = n(),
+          value_mean = round(mean(value, na.rm = TRUE), 3),
+          value_min = round(min(value, na.rm = TRUE), 3),
+          value_max = round(max(value, na.rm = TRUE), 3),
+          unit = dplyr::first(unit),
+          .groups = "drop"
+        )
+      return(
+        waterbody_opcat_shp %>%
+          left_join(tab_summary_by_wb, by = c("water_body" = "waterbody_id")) %>%
+          mutate(spatial_layer = input$dl_spatial_layer, variable = input$dl_variable)
+      )
+    }
+
     tab_data <- downloader_tabular_all_data()
 
     if (input$dl_spatial_layer == "catchment") {
@@ -2385,7 +2905,7 @@ server <- function(input, output, session) {
   # Context strip stats for the downloader
   downloader_preview_rows <- reactive({
     if (identical(input$dl_data_type, "tabular")) {
-      if (is.null(rv())) return(0)
+      if (!is_wbchem_variable(input$dl_variable) && is.null(rv())) return(0)
       nrow(downloader_tabular_data())
     } else {
       nrow(downloader_spatial_data())
@@ -2416,7 +2936,7 @@ server <- function(input, output, session) {
 
   output$data_table <- DT::renderDataTable({
     if (input$dl_data_type == "tabular") {
-      if (is.null(rv())) {
+      if (!is_wbchem_variable(input$dl_variable) && is.null(rv())) {
         return(DT::datatable(data.frame(Message = "Select a subbasin on the Map tab to build a download."),
                              rownames = FALSE, options = list(dom = "t")))
       }
@@ -2461,11 +2981,17 @@ server <- function(input, output, session) {
       prefix <- if (input$dl_data_type == "spatial") "ecomix_spatial" else "ecomix_tabular"
       layer_suffix <- if (input$dl_data_type == "spatial") paste0("_", input$dl_spatial_layer) else ""
       id_suffix <- if (input$dl_data_type == "spatial") {
-        if (input$dl_spatial_layer == "subbasins") "all_subbasins" else "catchment"
+        if (input$dl_spatial_layer == "subbasins") "all_subbasins"
+        else if (input$dl_spatial_layer == "waterbodies") "all_waterbodies"
+        else "catchment"
+      } else if (is_wbchem_variable(input$dl_variable)) {
+        "all_waterbodies"
       } else {
         paste0("subbasin_", rv())
       }
-      var_label <- if (is_chem_variable(input$dl_variable)) chem_key_from_variable(input$dl_variable) else input$dl_variable
+      var_label <- if (is_wbchem_variable(input$dl_variable)) wbchem_key_from_variable(input$dl_variable)
+        else if (is_chem_variable(input$dl_variable)) chem_key_from_variable(input$dl_variable)
+        else input$dl_variable
       paste0(prefix, layer_suffix, "_", id_suffix, "_", var_label, ".", ext)
     },
     content = function(file) {
