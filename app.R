@@ -574,6 +574,122 @@ get_chem_spatial_summary <- function(chem_key, stat_val) {
   chem_spatial_cache[[key]]
 }
 
+# ---- Ecological risk thresholds (by subbasin) ----
+#
+# Each CSV under data-chem/5_EcologicalRisk/ is one chemical's per-site
+# ecological risk assessment - currently just fipronil, with more chemicals
+# expected to land here over time as one file each, sharing the same layout
+# (EASTING/NORTHING/site_id, exposure summary stats, and a set of yes/no/na
+# "<...>_risk_threshold_<...>" columns comparing exposure against generic and
+# site-specific HC5 standards). Files are picked up by folder listing so
+# adding a chemical is just adding a CSV, no code change. Sites are keyed by
+# the same SITE_ID used in the daily chemical modelling above, so a single
+# lookup against Subbasin_Siteids_Key.csv resolves every file to a subbasin.
+eco_risk_dir <- here("data-chem/5_EcologicalRisk")
+eco_risk_site_key <- read.csv(file.path(chem_dir, "Subbasin_Siteids_Key.csv"))
+
+eco_risk_files <- list.files(eco_risk_dir, pattern = "_risk\\.csv$", full.names = TRUE)
+names(eco_risk_files) <- sub("_risk\\.csv$", "", basename(eco_risk_files))
+
+# Readable labels for the four standard threshold comparisons - shown in
+# each site's map popup alongside its site-specific counterpart (ss_<col>)
+# where a site-specific HC5 was available. Only columns actually present in
+# a given file are used, so a future file with a different set of threshold
+# columns still renders (just without these specific lines).
+eco_risk_flag_labels <- c(
+  acute_risk_threshold_p90       = "Acute risk (90th percentile exposure)",
+  chronic_risk_threshold_p90     = "Chronic risk (90th percentile exposure)",
+  acute_risk_threshold_average   = "Acute risk (average exposure)",
+  chronic_risk_threshold_average = "Chronic risk (average exposure)"
+)
+
+is_na_string <- function(x) is.na(x) | tolower(trimws(x)) == "na"
+
+# Overall risk level per site - None/Acute/Chronic/Both - from whichever
+# acute/chronic comparison (90th-percentile or average exposure) trips
+# first, preferring the site-specific HC5 threshold columns (ss_*) over the
+# generic ones whenever a site-specific HC5 exists for that site. Unlike the
+# popup's generic scan over every "*risk_threshold*" column, this needs to
+# know specifically which columns mean acute vs. chronic, so a future
+# chemical file needs the same acute/chronic/generic/ss_ column layout for
+# this to keep working.
+compute_eco_risk_level <- function(df) {
+  has_ss          <- !is_na_string(df[["site_specific hc5"]])
+  generic_acute   <- df$acute_risk_threshold_p90   == "yes" | df$acute_risk_threshold_average   == "yes"
+  generic_chronic <- df$chronic_risk_threshold_p90 == "yes" | df$chronic_risk_threshold_average == "yes"
+  ss_acute        <- df$ss_acute_risk_threshold_p90   == "yes" | df$ss_acute_risk_threshold_average   == "yes"
+  ss_chronic      <- df$ss_chronic_risk_threshold_p90 == "yes" | df$ss_chronic_risk_threshold_average == "yes"
+  eff_acute   <- ifelse(has_ss, ss_acute, generic_acute)
+  eff_chronic <- ifelse(has_ss, ss_chronic, generic_chronic)
+  factor(
+    dplyr::case_when(
+      eff_acute & eff_chronic ~ "Both",
+      eff_acute               ~ "Acute",
+      eff_chronic              ~ "Chronic",
+      TRUE                     ~ "None"
+    ),
+    levels = c("None", "Acute", "Chronic", "Both")
+  )
+}
+
+# Colour palette for the four risk levels, built only from the app's
+# existing design tokens (a light-to-dark ramp along the single accent hue)
+# so the map stays inside the "mono + one accent" design system - shared by
+# the map markers and the map legend. Acute vs. Chronic aren't actually
+# ordered relative to each other (two independent flags, not severity
+# steps); this tint/accent assignment is a deliberate but arbitrary choice,
+# easy to swap once the detail page design is finalised.
+eco_risk_pal <- colorFactor(
+  c(ec$rule_light, ec$accent_tint, ec$accent, ec$accent_ink),
+  levels = c("None", "Acute", "Chronic", "Both")
+)
+
+build_eco_risk_popup <- function(df, chemical_key, chemical_label) {
+  flag_cols <- intersect(names(eco_risk_flag_labels), names(df))
+  vapply(seq_len(nrow(df)), function(i) {
+    lines <- vapply(flag_cols, function(col) {
+      ss_col <- paste0("ss_", col)
+      ss_val <- if (ss_col %in% names(df)) df[[ss_col]][i] else NA
+      ss_txt <- if (!is.null(ss_val) && !is_na_string(ss_val)) {
+        paste0(" · site-specific: ", ss_val)
+      } else ""
+      paste0(eco_risk_flag_labels[[col]], ": ", df[[col]][i], ss_txt)
+    }, character(1))
+    paste0(
+      "<strong>", chemical_label, " · ecological risk</strong>",
+      "<br>Site ", df$site_id[i], " · Subbasin ", df$subbasin[i],
+      "<br>", paste(lines, collapse = "<br>"),
+      "<br><a href='#' onclick=\"Shiny.setInputValue('open_eco_risk_detail', '",
+      chemical_key, "||", df$site_id[i],
+      "', {priority: 'event'}); return false;\">View ecological risk detail →</a>"
+    )
+  }, character(1))
+}
+
+eco_risk_data <- lapply(names(eco_risk_files), function(nm) {
+  df <- read.csv(eco_risk_files[[nm]], check.names = FALSE)
+  df <- df %>% dplyr::inner_join(eco_risk_site_key, by = c("site_id" = "SITE_ID"))
+
+  # EASTING/NORTHING are British National Grid (EPSG:27700, confirmed via
+  # gis-data/subbasins_bng.prj) - transform to WGS84 for the leaflet map,
+  # the same CRS used the other direction for the Data Downloader's export
+  # (see the st_transform(df_spatial, 27700) call further down this file).
+  pts <- sf::st_as_sf(df, coords = c("EASTING", "NORTHING"), crs = 27700) %>%
+    sf::st_transform(4326)
+  coords <- sf::st_coordinates(pts)
+  df$lon <- coords[, "X"]
+  df$lat <- coords[, "Y"]
+
+  df$risk_level <- compute_eco_risk_level(df)
+  df$popup_html <- build_eco_risk_popup(df, nm, tools::toTitleCase(nm))
+  df
+})
+names(eco_risk_data) <- names(eco_risk_files)
+
+# One choice per chemical file for the Map rail's chemical picker.
+eco_risk_choices <- names(eco_risk_data)
+names(eco_risk_choices) <- tools::toTitleCase(eco_risk_choices)
+
 # ---- Chemical concentration predictions (monthly, by water body) ----
 #
 # The "modelled" counterpart of the chem_* dataset above: instead of a daily
@@ -1041,8 +1157,18 @@ ui <- page_navbar(
                       "Waterbodies (modelled)" = "waterbodies",
                       "Measured sites" = "measured_sites",
                       "Observed hydrology sites" = "observed_hydro",
-                      "Chemical data coverage" = "chem_coverage"),
+                      "Chemical data coverage" = "chem_coverage",
+                      "Ecological risk" = "eco_risk"),
           selected = "subbasins"
+        ),
+        conditionalPanel(
+          condition = "input.map_layers && input.map_layers.includes('eco_risk')",
+          selectInput(
+            "eco_risk_chemical",
+            label = "Ecological risk · chemical",
+            choices = eco_risk_choices,
+            selected = eco_risk_choices[1]
+          )
         ),
         selectInput(
           "map_basemap",
@@ -1135,6 +1261,19 @@ ui <- page_navbar(
           plotOutput("site_time_series", height = "100%")
         )
       )
+    )
+  ),
+
+  ## Panel 1d: Ecological risk detail - reached by clicking a point on the
+  ## Map's Ecological risk layer. Deliberately a single minimal card for
+  ## now (no ctx_strip, no sidebar) - the design here is expected to change
+  ## once the underlying risk assessment content is finalised.
+  nav_panel(
+    title = "Ecological Risk",
+    card(
+      full_screen = TRUE,
+      card_header("Ecological risk · site detail"),
+      uiOutput("eco_risk_detail_card")
     )
   ),
 
@@ -1381,6 +1520,13 @@ server <- function(input, output, session) {
   rv_measured_site <- reactiveVal()
   rv_waterbody <- reactiveVal()
 
+  # Selected ecological risk point (chemical key + site_id), set by clicking
+  # a marker's popup link on the Map's Ecological risk layer; drives the
+  # Ecological Risk detail tab. Two parallel reactiveVals rather than one
+  # compound value, matching the rv_measured_site/rv_waterbody idiom above.
+  rv_eco_risk_chemical <- reactiveVal()
+  rv_eco_risk_site <- reactiveVal()
+
   projection_sources <- reactive({
     list(
       forcing = ds_proj_forcing,
@@ -1530,6 +1676,38 @@ server <- function(input, output, session) {
 
   # Layer toggles from the rail (replacing leaflet's own layers control, so
   # the map surface carries no floating chrome of its own).
+  # Ecological risk polygons - shared by the "Ecological risk" layer toggle
+  # and its chemical picker, since either one changing should redraw it.
+  draw_eco_risk_layer <- function() {
+    proxy <- leafletProxy("basemap") %>% clearGroup("eco_risk")
+    if ("eco_risk" %in% input$map_layers) {
+      df <- eco_risk_data[[input$eco_risk_chemical]]
+      if (!is.null(df)) {
+        chemical_label <- names(eco_risk_choices)[eco_risk_choices == input$eco_risk_chemical]
+        proxy %>% addCircleMarkers(
+          data = df,
+          lng = ~lon,
+          lat = ~lat,
+          layerId = ~site_id,
+          radius = 6,
+          color = "#ffffff",
+          weight = 1.5,
+          fillColor = ~eco_risk_pal(risk_level),
+          fillOpacity = 0.9,
+          label = ~paste0(chemical_label, " · ", risk_level, " · Site ", site_id),
+          popup = ~popup_html,
+          group = "eco_risk"
+        ) %>% addLegend(
+          "bottomleft",
+          pal = eco_risk_pal,
+          values = df$risk_level,
+          title = "Ecological risk",
+          group = "eco_risk"
+        )
+      }
+    }
+  }
+
   observeEvent(input$map_layers, {
     proxy <- leafletProxy("basemap")
     proxy %>% clearGroup("opcat") %>% clearGroup("waterbodies") %>%
@@ -1613,7 +1791,12 @@ server <- function(input, output, session) {
         group = "chem_coverage"
       )
     }
+    draw_eco_risk_layer()
   }, ignoreNULL = FALSE)
+
+  # Redraw when the ecological risk chemical picker changes (the layer
+  # toggle above only fires on map_layers changes, not this).
+  observeEvent(input$eco_risk_chemical, draw_eco_risk_layer(), ignoreInit = TRUE)
 
   # Basemap tile switcher.
   observeEvent(input$map_basemap, {
@@ -1637,6 +1820,80 @@ server <- function(input, output, session) {
     rv_waterbody(input$open_waterbody_details)
     bslib::nav_select("site_entity_type", selected = "modelled", session = session)
     bslib::nav_select("main_nav", selected = "Site Details", session = session)
+  })
+
+  # Open the Ecological Risk detail tab from an eco-risk marker's popup
+  # link, which passes "<chemical key>||<site_id>" (the "||" delimiter
+  # mirrors the compound cache keys used elsewhere in this file, e.g.
+  # get_chem_subbasin_series() above).
+  observeEvent(input$open_eco_risk_detail, {
+    parts <- strsplit(input$open_eco_risk_detail, "\\|\\|")[[1]]
+    rv_eco_risk_chemical(parts[1])
+    rv_eco_risk_site(as.integer(parts[2]))
+    bslib::nav_select("main_nav", selected = "Ecological Risk", session = session)
+  })
+
+  # Ecological Risk detail tab - single row for the selected chemical/site,
+  # NULL until a point has been picked from the Map's Ecological risk layer.
+  eco_risk_selected <- reactive({
+    chem <- rv_eco_risk_chemical()
+    site <- rv_eco_risk_site()
+    if (is.null(chem) || is.null(site)) return(NULL)
+    df <- eco_risk_data[[chem]]
+    if (is.null(df)) return(NULL)
+    row <- df[df$site_id == site, ]
+    if (nrow(row) == 0) NULL else row
+  })
+
+  output$eco_risk_detail_card <- renderUI({
+    row <- eco_risk_selected()
+    if (is.null(row)) {
+      return(div(class = "panel-note",
+                 "Select a point on the Map's Ecological risk layer to see its detail here."))
+    }
+
+    fmt_conc <- function(x) formatC(x, format = "g", digits = 3)
+    hc5_txt <- function(val) if (is_na_string(val)) "Not available" else val
+
+    tagList(
+      div(
+        class = "ctx-stats",
+        ctx_stat("Chemical", tools::toTitleCase(rv_eco_risk_chemical())),
+        ctx_stat("Site id", row$site_id),
+        ctx_stat("Subbasin", row$subbasin),
+        ctx_stat("Risk level",
+                 span(style = paste0("color:", eco_risk_pal(row$risk_level), "; font-weight:600;"),
+                      as.character(row$risk_level)))
+      ),
+      div(
+        class = "ctx-stats",
+        ctx_stat("Easting", row$EASTING),
+        ctx_stat("Northing", row$NORTHING),
+        ctx_stat("Days of data", row$n_days)
+      ),
+      div(
+        class = "ctx-stats",
+        ctx_stat("Median 90th-pctile conc. (µg/L)", fmt_conc(row$median_of_p90_ug)),
+        ctx_stat("95th-pctile of 90th-pctile conc. (µg/L)", fmt_conc(row$p95_of_p90_ug)),
+        ctx_stat("Median conc. (µg/L)", fmt_conc(row$median_of_median_ug)),
+        ctx_stat("95th-pctile of median conc. (µg/L)", fmt_conc(row$p95_of_median_ug))
+      ),
+      div(
+        class = "ctx-stats",
+        ctx_stat("Generic HC5", fmt_conc(row$generic_hc5)),
+        ctx_stat("Generic HC5/10", fmt_conc(row[["generic_hc5_divided by 10"]])),
+        ctx_stat("Site-specific HC5", hc5_txt(row[["site_specific hc5"]])),
+        ctx_stat("Site-specific HC5/10", hc5_txt(row[["site_specific hc5/10"]]))
+      ),
+      tags$h6("Threshold comparisons", style = "margin-top:12px;"),
+      tagList(lapply(names(eco_risk_flag_labels), function(col) {
+        ss_col <- paste0("ss_", col)
+        ss_val <- if (ss_col %in% names(row)) row[[ss_col]] else NA
+        ss_txt <- if (!is.null(ss_val) && !is_na_string(ss_val)) paste0(" · site-specific: ", ss_val) else ""
+        div(style = paste0("font-size:12px; color:", ec$ink_dim, "; margin-bottom:4px;"),
+            paste0(eco_risk_flag_labels[[col]], ": ", row[[col]], ss_txt))
+      }))
+    )
   })
 
   # Highlight the selected subbasin in the accent.
